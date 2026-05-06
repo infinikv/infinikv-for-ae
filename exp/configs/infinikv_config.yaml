@@ -1,0 +1,4 @@
+chunk_size: 128 # must align with vllm's block size 
+max_num_local_file: 100000
+max_local_disk_size: 14000 # GB
+sys_config_path: "sosp/exp/configs/sys_config.ini"

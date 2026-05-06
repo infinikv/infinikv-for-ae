@@ -1,0 +1,4 @@
+chunk_size: 128 # must align with vllm's block size
+max_num_local_file: 50000
+max_local_disk_size: 7000 # GB (32000 GPU files x 2 NVMe drives = 64000 < 1000000 limit)
+sys_config_path: "sosp/exp/configs/sys_config_gpu1.ini"

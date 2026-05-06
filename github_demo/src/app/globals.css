@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --background: #FFFFFF;
+    --foreground: #1A1A2E;
+    --infinikv: #0EA5E9;
+    --lmcache: #F59E0B;
+    --card-bg: #F8FAFC;
+    --card-border: #E2E8F0;
+    --delivery: #10B981;
+}
+
+body {
+    color: var(--foreground);
+    background: var(--background);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Scrollbar */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #F1F5F9; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+/* Gradient text */
+.gradient-text-infinikv {
+    background: linear-gradient(135deg, #0EA5E9, #0284C7);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.gradient-text-hero {
+    background: linear-gradient(135deg, #0EA5E9, #6366F1, #8B5CF6);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+/* Progress bars */
+.progress-infinikv { background: linear-gradient(90deg, #0EA5E9, #0284C7); }
+.progress-lmcache { background: linear-gradient(90deg, #F59E0B, #D97706); }
+.progress-baseline { background: linear-gradient(90deg, #94A3B8, #64748B); }
+.progress-delivery { background: linear-gradient(90deg, #10B981, #0D9488); }
+.gradient-text-delivery {
+    background: linear-gradient(135deg, #10B981, #0D9488);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+/* Card hover */
+.card-hover { transition: all 0.3s ease; }
+.card-hover:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+
+/* Subtle grid background (dark) */
+.bg-grid {
+    background-image:
+        linear-gradient(rgba(48,54,61,0.5) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(48,54,61,0.5) 1px, transparent 1px);
+    background-size: 60px 60px;
+}
+
+/* Subtle grid background (light) */
+.bg-grid-light {
+    background-image:
+        linear-gradient(rgba(226,232,240,0.4) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(226,232,240,0.4) 1px, transparent 1px);
+    background-size: 60px 60px;
+}
+
+/* Metric animation */
+@keyframes number-tick {
+    0% { opacity: 0.3; transform: scale(0.95); }
+    50% { opacity: 1; transform: scale(1.02); }
+    100% { opacity: 1; transform: scale(1); }
+}
+.metric-tick { animation: number-tick 0.3s ease-out; }
+
+/* Chart styling overrides */
+.recharts-cartesian-axis-tick-value {
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    fill: #6B7280 !important;
+}
+.recharts-legend-item-text {
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: #374151 !important;
+}
+.recharts-tooltip-wrapper {
+    filter: drop-shadow(0 4px 16px rgba(0,0,0,0.1));
+}
+.recharts-default-tooltip {
+    border-radius: 12px !important;
+    border: 1px solid #E5E7EB !important;
+    padding: 12px 16px !important;
+}
+.recharts-tooltip-label {
+    font-weight: 600 !important;
+    color: #111827 !important;
+    margin-bottom: 6px !important;
+}

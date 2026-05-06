@@ -1,0 +1,8 @@
+CLAUDE.md
+DEBUG.md
+PROGRESS.md
+.claude
+exp/logs
+exp/outputs
+exp/results
+**/__pycache__

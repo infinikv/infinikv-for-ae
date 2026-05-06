@@ -1,0 +1,44 @@
+env:
+  PATH: "$HOME/.local/bin:$PATH"
+
+steps:
+  - label: ":pip: Prepare venv"
+    key: "venv"
+    plugins:
+      - cache#v1.7.0:
+          key-extra: "venv-{{ BUILDKITE_BUILD_ID }}"
+          path: ".venv"
+          save: "pipeline"
+          force: "true"
+    command:
+      - bash .buildkite/install-env.sh
+
+  - label: ":pytest: Run pytest"
+    key: "pytest"
+    depends_on:
+      - "venv"
+    timeout_in_minutes: 25
+    plugins:
+      - cache#v1.7.0:
+          key-extra: "venv-{{ BUILDKITE_BUILD_ID }}"
+          path: ".venv"
+          restore: "pipeline"
+    command:
+      - bash .buildkite/install-infinikv.sh
+      - source .venv/bin/activate
+      - |
+        INFINIKV_TRACK_USAGE="false" \
+        pytest --cov=infinikv \
+          --cov-report term --cov-report=html:coverage-test \
+          --cov-report=xml:coverage-test.xml --html=durations/test.html \
+          --ignore=tests/disagg --ignore=tests/v1/test_pos_kernels.py
+    artifact_paths:
+      - "durations/test.html"
+      - "coverage-test.xml"
+      - "coverage-test/**/*"
+
+  - label: "Upload Coverage Report"
+    command: |
+      cat << EOF | buildkite-agent annotate --style "info"
+        Read the <a href="artifact://coverage-test/index.html">uploaded coverage report</a>
+      EOF
