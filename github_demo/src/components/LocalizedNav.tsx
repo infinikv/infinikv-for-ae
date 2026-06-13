@@ -33,22 +33,16 @@ export function LocalizedNavMenu() {
     <div className="hidden md:flex items-center space-x-0.5">
       <NavLink href="/" label={t(locale, "nav.home")} hover="hover:text-gray-900 hover:bg-gray-50" />
       <NavLink
-        href="/demo/drone-delivery"
-        label={t(locale, "nav.single")}
-        dot="bg-emerald-400"
-        hover="hover:text-emerald-600 hover:bg-emerald-50/60"
-      />
-      <NavLink
         href="/demo/drone-fleet"
         label={t(locale, "nav.multi")}
-        dot="bg-rose-400"
-        hover="hover:text-rose-600 hover:bg-rose-50/60"
+        dot="bg-sky-500"
+        hover="hover:text-sky-600 hover:bg-sky-50/60"
       />
       <NavLink
         href="/demo/stress-test"
         label={t(locale, "nav.stress")}
-        dot="bg-rose-600"
-        hover="hover:text-rose-700 hover:bg-rose-50/60"
+        dot="bg-violet-500"
+        hover="hover:text-violet-600 hover:bg-violet-50/60"
       />
     </div>
   );

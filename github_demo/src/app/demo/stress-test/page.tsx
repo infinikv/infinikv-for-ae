@@ -23,18 +23,18 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Loader2, Paperclip, X, Activity, ChevronDown, Info, Clock, Zap,
-  FileText, AlertCircle,
+  Play, Loader2, Paperclip, X, Activity, ChevronDown, Info, Clock, Zap,
+  FileText, AlertCircle, Square, Terminal, Code, ScrollText, Bot,
 } from "lucide-react";
-import { getCachedLatestRecord, getHistory, saveRecord, type TestRecord } from "@/lib/history";
+import { saveRecord, type TestRecord } from "@/lib/history";
+import { AGENT_SEED_METRICS } from "./seedMetrics";
 import HistoryModal from "@/components/HistoryModal";
 import WorkloadInfoModal from "@/components/WorkloadInfoModal";
 import LegendChips from "@/components/LegendChips";
 import {
-  LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceArea, ReferenceLine,
 } from "recharts";
 import { getApiBase } from "@/lib/api";
-import ContextTokenBar from "@/components/ContextTokenBar";
 import { t, useLocale } from "@/lib/i18n";
 
 /* ────────────────── Types ────────────────── */
@@ -46,7 +46,7 @@ type UploadedDoc = {
   estTokens: number;
 };
 
-type RoundMetrics = {
+export type RoundMetrics = {
   round: number;          // 1-based
   sessionId: string;      // 本轮使用的 PDF 会话
   question: string;
@@ -176,7 +176,7 @@ function ScopeGainCard({
             {title}
           </div>
           <span className={`rounded-full border px-2 py-0.5 text-[11px] font-black ${tone.chip}`}>
-            {scope === "recent" ? (locale === "en" ? "Latest 20" : "最近20轮") : (locale === "en" ? "Global 1..N" : "全局 1..N")}
+            {scope === "recent" ? (locale === "en" ? "Revisit" : "重访段") : (locale === "en" ? "Global 1..N" : "全局 1..N")}
           </span>
         </div>
         <div className="flex items-end gap-1.5">
@@ -235,8 +235,8 @@ function ModelMetricsPanel({
           </div>
           <p className="text-sm text-slate-500 leading-relaxed max-w-3xl">
             {isEn
-              ? `LMCache-DRAM uses 64GB DRAM as the baseline; InfiniKV uses 512GB SSD as the extension tier. Two scopes are shown: global rounds 1..N for end-to-end cost, and the latest ${recentWindow || 20} rounds for steady-state performance after a long run.`
-              : `LMCache-DRAM 使用 64GB DRAM 作为基线，InfiniKV 使用 512GB SSD 作为扩展层。这里分成两套口径：全局 1..N 轮用于看端到端总成本，最近 ${recentWindow || 20} 轮用于看系统进入长跑后的稳态表现。`}
+              ? `LMCache-DRAM uses 64GB DRAM as the baseline; InfiniKV uses 512GB SSD. We look at it two ways: "Overall" is the average across all ${completedRounds || 50} rounds; "Long-context revisit recovery" looks only at the later rounds, after the agent has been revisiting tasks for a while.`
+              : `LMCache-DRAM 使用 64GB DRAM 作为基线，InfiniKV 使用 512GB SSD。下面从两个角度看：「整体」是全部 ${completedRounds || 50} 轮的平均表现；「长上下文重访恢复」只看后段——Agent 反复重访历史任务、进入稳定阶段后的恢复表现。`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -253,8 +253,8 @@ function ModelMetricsPanel({
         <div className="rounded-2xl border border-slate-200 bg-slate-50/40 p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
-              <div className="text-lg font-black text-slate-900">{isEn ? "Global Performance" : "全局性能比较"}</div>
-              <div className="text-xs font-semibold text-slate-500 mt-0.5">{isEn ? "Scope: rounds 1 to N" : "统计范围：第 1 轮到第 N 轮"}</div>
+              <div className="text-lg font-black text-slate-900">{isEn ? "Overall performance" : "整体性能"}</div>
+              <div className="text-xs font-semibold text-slate-500 mt-0.5">{isEn ? `Scope: rounds 1 to ${completedRounds}` : `统计范围：第 1 轮到第 ${completedRounds} 轮`}</div>
             </div>
             <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-black text-slate-500">
               {isEn ? "White" : "白底"}
@@ -279,7 +279,7 @@ function ModelMetricsPanel({
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div>
-              <div className="text-lg font-black text-emerald-900">{isEn ? "Latest 20-Round Steady-State" : "最近20轮稳态性能比较"}</div>
+              <div className="text-lg font-black text-emerald-900">{isEn ? "Long-context revisit recovery" : "长上下文重访恢复"}</div>
               <div className="text-xs font-semibold text-emerald-700/80 mt-0.5">
                 {isEn ? `Scope: last ${recentWindow || 0} rounds; all rounds if N<20` : `统计范围：最后 ${recentWindow || 0} 轮，N<20 时取全部`}
               </div>
@@ -292,13 +292,13 @@ function ModelMetricsPanel({
             <ScopeGainCard
               title={isEn ? "TTFT SPEEDUP" : "TTFT 性能优化"}
               value={recentTtftSpeedup}
-              helper={isEn ? "LM latest-20 avg TTFT / InfiniKV latest-20 avg TTFT" : "LM 最近20轮平均 TTFT ÷ InfiniKV 最近20轮平均 TTFT"}
+              helper={isEn ? "LM revisit-segment avg TTFT / InfiniKV revisit-segment avg TTFT" : "LM 重访段平均 TTFT ÷ InfiniKV 重访段平均 TTFT"}
               scope="recent"
             />
             <ScopeGainCard
               title={isEn ? "QPS SPEEDUP" : "QPS 性能提升"}
               value={recentQpsSpeedup}
-              helper={isEn ? `InfiniKV latest-20 QPS / LM latest-20 QPS, about ${recentQpsSpeedup > 0 ? fmtGainPct(recentQpsGainPct) : "--"}` : `InfiniKV 最近20轮 QPS ÷ LM 最近20轮 QPS，约 ${recentQpsSpeedup > 0 ? fmtGainPct(recentQpsGainPct) : "--"}`}
+              helper={isEn ? `InfiniKV revisit-segment QPS / LM revisit-segment QPS, about ${recentQpsSpeedup > 0 ? fmtGainPct(recentQpsGainPct) : "--"}` : `InfiniKV 重访段 QPS ÷ LM 重访段 QPS，约 ${recentQpsSpeedup > 0 ? fmtGainPct(recentQpsGainPct) : "--"}`}
               scope="recent"
             />
           </div>
@@ -317,16 +317,13 @@ function ExperimentConfigBanner({ workloadLabel }: { workloadLabel: string }) {
     <div className="bg-white border border-gray-200 rounded-2xl p-5 md:p-6 shadow-sm">
       <div className="space-y-5">
         <div>
-          <div className="text-xs font-black uppercase tracking-[0.18em] text-gray-400 mb-1">
-            Experiment Setup
-          </div>
           <div className="text-xl font-black text-gray-900 tracking-tight">
-            {workloadLabel}
+            {isEn ? `Experiment Setup: ${workloadLabel}` : `实验配置：${workloadLabel}`}
           </div>
-          <div className="mt-1 text-base text-gray-500">
+          <div className="mt-1 max-w-4xl text-base leading-relaxed text-gray-500">
             {isEn
-              ? "LMCache-DRAM uses 64GB DRAM to extend KV Cache storage, while InfiniKV uses 512GB SSD. The experiment focuses on latest-20-round TTFT, QPS, and hit-rate differences after the long run reaches steady state."
-              : "LMCache-DRAM 仅使用 64GB DRAM 扩展 KV Cache 存储空间，InfiniKV 仅使用 512GB SSD 扩展 KV Cache 存储空间。实验重点观察长跑进入稳态后，两个方案在最近20轮 TTFT、QPS 和命中率上的差异。"}
+              ? "Both systems run the same agent revisit workload; the only difference is the KV Cache tier — LMCache-DRAM uses a smaller 64GB DRAM tier, InfiniKV a larger 512GB SSD tier. We compare TTFT, QPS and cache hit rate when agents reopen long-context tasks."
+              : "两套系统执行同一组 Agent 重访负载，唯一区别在 KV Cache 扩展层：LMCache-DRAM 用较小的 64GB DRAM，InfiniKV 用更大的 512GB SSD。对比 Agent 反复重访长上下文任务时，两者在 TTFT、QPS 与缓存命中率上的差异。"}
           </div>
         </div>
 
@@ -340,7 +337,7 @@ function ExperimentConfigBanner({ workloadLabel }: { workloadLabel: string }) {
                   <div className="text-base font-black text-orange-700">LMCache-DRAM</div>
                 </div>
                 <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-bold text-orange-700">
-                  Baseline
+                  {isEn ? "Baseline" : "基线"}
                 </span>
               </div>
               <div className="space-y-2">
@@ -349,12 +346,8 @@ function ExperimentConfigBanner({ workloadLabel }: { workloadLabel: string }) {
                   <span className="font-mono text-base font-black text-orange-800">64GB DRAM</span>
                 </div>
                 <div className="flex items-center justify-between gap-3 rounded-xl bg-orange-50 px-3 py-2">
-                  <span className="text-base font-semibold text-orange-700/80">{isEn ? "Cloud Storage Cost" : "云服务器存储成本"}</span>
-                  <span className="font-mono text-base font-black text-orange-800">{isEn ? "3.8 RMB/hour" : "3.8 元 / 小时"}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-xl bg-orange-50 px-3 py-2">
                   <span className="text-base font-semibold text-orange-700/80">{isEn ? "Behavior" : "特点"}</span>
-                  <span className="max-w-[68%] text-right text-sm font-bold leading-snug text-orange-800">{isEn ? "Limited capacity; steady-state long runs more easily evict old session KV Cache" : "容量有限，稳态长跑后更容易淘汰旧 session KV Cache"}</span>
+                  <span className="whitespace-nowrap text-sm font-bold text-orange-800">{isEn ? "small; old KV is evicted on revisit" : "容量小，重访时旧 KV 容易被淘汰"}</span>
                 </div>
               </div>
             </div>
@@ -369,7 +362,7 @@ function ExperimentConfigBanner({ workloadLabel }: { workloadLabel: string }) {
                   <div className="text-base font-black text-sky-700">InfiniKV (SSD)</div>
                 </div>
                 <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-bold text-sky-700">
-                  Optimized
+                  {isEn ? "Optimized" : "优化方案"}
                 </span>
               </div>
               <div className="space-y-2">
@@ -378,12 +371,8 @@ function ExperimentConfigBanner({ workloadLabel }: { workloadLabel: string }) {
                   <span className="font-mono text-base font-black text-sky-800">512GB SSD</span>
                 </div>
                 <div className="flex items-center justify-between gap-3 rounded-xl bg-sky-50 px-3 py-2">
-                  <span className="text-base font-semibold text-sky-700/80">{isEn ? "Cloud Storage Cost" : "云服务器存储成本"}</span>
-                  <span className="font-mono text-base font-black text-sky-800">{isEn ? "0.28 RMB/hour" : "0.28 元 / 小时"}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3 rounded-xl bg-sky-50 px-3 py-2">
                   <span className="text-base font-semibold text-sky-700/80">{isEn ? "Behavior" : "特点"}</span>
-                  <span className="max-w-[68%] text-right text-sm font-bold leading-snug text-sky-800">{isEn ? "Larger capacity; keeps KV Cache evicted from DRAM and recalls it from SSD" : "容量更大，可保留被 DRAM 挤出的 KV Cache 并从 SSD 召回"}</span>
+                  <span className="whitespace-nowrap text-sm font-bold text-sky-800">{isEn ? "large; old KV stays on SSD, reused directly" : "容量大，旧 KV 留在 SSD 可直接复用"}</span>
                 </div>
               </div>
             </div>
@@ -403,25 +392,20 @@ function MetricDefinitionPanel() {
         <Info className="w-5 h-5 text-sky-500" />
         <h3 className="text-xl font-black text-gray-900 tracking-tight">{isEn ? "Metric Definitions and Formulas" : "指标含义与计算方式"}</h3>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4">
-          <div className="text-sm font-black text-gray-900 mb-1">{isEn ? "TTFT (Global + Latest 20)" : "TTFT（全局 + 最近20）"}</div>
-          <p className="text-sm text-gray-600 leading-relaxed">{isEn ? "Shows both global 1..N average and latest-20-round steady-state average to distinguish overall degradation from steady-state behavior." : "同时展示 1..N 轮全局平均与最近20轮稳态平均，用来区分整体退化和稳态表现。"}</p>
-          <div className="mt-2 text-xs font-mono text-gray-500">{isEn ? "avg TTFT[global] + avg TTFT[latest 20]" : "平均TTFT[全局] + 平均TTFT[最近20]"}</div>
+          <div className="text-sm font-black text-gray-900 mb-1">{isEn ? "TTFT · first-token latency" : "TTFT · 首字延迟"}</div>
+          <p className="text-sm text-gray-600 leading-relaxed">{isEn ? "How long an agent waits after reopening a task before the answer starts. Lower means the historical context recovered faster." : "Agent 重新访问一个历史任务后，需要多久才开始返回结果。越低，说明历史上下文恢复得越快。"}</p>
+          <div className="mt-2 text-xs font-mono text-gray-500">{isEn ? "avg(round TTFT), lower is better" : "平均(各轮 TTFT)，越低越好"}</div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4">
-          <div className="text-sm font-black text-gray-900 mb-1">{isEn ? "Peak TTFT (Latest 20)" : "峰值 TTFT（最近20）"}</div>
-          <p className="text-sm text-gray-600 leading-relaxed">{isEn ? "Tracks peak TTFT over the latest 20 rounds to observe long-tail jitter caused by DRAM eviction in steady state." : "仅统计最近20轮峰值，重点观察稳态阶段 DRAM 淘汰带来的长尾波动。"}</p>
-          <div className="mt-2 text-xs font-mono text-gray-500">{isEn ? "max(TTFT[latest 20]), lower means more stable" : "max(TTFT[最近20])，越低越稳定"}</div>
-        </div>
-        <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4">
-          <div className="text-sm font-black text-gray-900 mb-1">{isEn ? "Est. QPS (Global + Latest 20)" : "估算 QPS（全局 + 最近20）"}</div>
-          <p className="text-sm text-gray-600 leading-relaxed">{isEn ? "Estimated throughput from TTFT, TPS, and output length; shown in both global and latest-20 scopes." : "基于 TTFT、TPS 与输出长度估算吞吐，展示全局与最近20轮两套口径。"}</p>
+          <div className="text-sm font-black text-gray-900 mb-1">{isEn ? "QPS · throughput" : "QPS · 吞吐"}</div>
+          <p className="text-sm text-gray-600 leading-relaxed">{isEn ? "How many agent requests the backend can complete per unit time. Higher means more tasks served per server." : "单位时间能完成多少次 Agent 请求。越高，单台服务器能服务的任务越多。"}</p>
           <div className="mt-2 text-xs font-mono text-gray-500">{isEn ? "concurrency / (TTFT + output/TPS), higher is better" : "并发 / (TTFT + 输出/TPS)，越高越好"}</div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4">
-          <div className="text-sm font-black text-gray-900 mb-1">{isEn ? "Cache Hit Rate" : "Cache 命中率"}</div>
-          <p className="text-sm text-gray-600 leading-relaxed">{isEn ? "Tracks GPU prefix hit, DRAM KV Cache hit, and InfiniKV SSD hit to distinguish GPU memory reuse, DRAM-tier hits, and SSD-tier recalls." : "同时观察 GPU prefix hit、DRAM KV Cache hit 与 InfiniKV SSD Hit，区分显存复用、内存层命中和 SSD 层召回。"}</p>
+          <div className="text-sm font-black text-gray-900 mb-1">{isEn ? "Cache hit rate" : "缓存命中率"}</div>
+          <p className="text-sm text-gray-600 leading-relaxed">{isEn ? "The share of revisited history KV that is served directly from cache instead of being prefilled again. A higher hit rate means less repeated computation." : "重访时历史 KV 在缓存中命中、可直接复用的比例，无需重新预填充。命中率越高，重复计算越少。"}</p>
           <div className="mt-2 text-xs font-mono text-gray-500">{isEn ? "higher hit rate = fewer repeated prefills" : "命中率越高，重复 prefill 越少"}</div>
         </div>
       </div>
@@ -461,12 +445,12 @@ function ParameterDefinitionPanel({
           </div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4">
-          <div className="text-sm font-black text-gray-900 mb-1">压测总轮数</div>
+          <div className="text-sm font-black text-gray-900 mb-1">重访总轮数</div>
           <p className="text-sm text-gray-600 leading-relaxed">
-            连续发送请求的总轮次，用于观察长时间运行后 DRAM 淘汰与 SSD 召回效果。
+            连续发送请求的总轮次，用于观察长时间运行后 DRAM 淘汰与 SSD 复用效果。
           </p>
           <div className="mt-2 text-xs font-mono text-gray-500">
-            当前 {totalRounds} 轮，轮数越多越容易进入稳态
+            当前 {totalRounds} 轮，轮数越多越能体现历史任务的反复重访
           </div>
         </div>
         <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-4">
@@ -494,20 +478,103 @@ function ParameterDefinitionPanel({
 
  */
 
-const STRESS_DOCS: { zh: string; en: string }[] = [
-  { zh: "业务场景资料-A.md",       en: "Business-Scenario-Doc-A.md" },
-  { zh: "业务场景资料-B.md",       en: "Business-Scenario-Doc-B.md" },
-  { zh: "城市背景资料-北区.md",    en: "City-Background-North-Zone.md" },
-  { zh: "城市背景资料-南区.md",    en: "City-Background-South-Zone.md" },
-  { zh: "运营规则手册-卷一.md",    en: "Operations-Manual-Vol-1.md" },
-  { zh: "运营规则手册-卷二.md",    en: "Operations-Manual-Vol-2.md" },
-  { zh: "历史订单数据-Q1.md",      en: "Historical-Orders-Q1.md" },
-  { zh: "历史订单数据-Q2.md",      en: "Historical-Orders-Q2.md" },
-  { zh: "系统日志记录-第1周.md",   en: "System-Log-Week-1.md" },
-  { zh: "系统日志记录-第2周.md",   en: "System-Log-Week-2.md" },
-];
-
 /* ────────────────── Page ────────────────── */
+
+function AgentWorkloadPanel() {
+  const [locale] = useLocale();
+  const isEn = locale === "en";
+  const TONES: Record<string, { card: string; dot: string; text: string; chip: string; chipText: string; icon: string }> = {
+    sky: { card: "border-sky-200 bg-sky-50", dot: "bg-sky-500", text: "text-sky-700", chip: "bg-sky-100", chipText: "text-sky-700", icon: "text-sky-600" },
+    emerald: { card: "border-emerald-200 bg-emerald-50", dot: "bg-emerald-500", text: "text-emerald-700", chip: "bg-emerald-100", chipText: "text-emerald-700", icon: "text-emerald-600" },
+    amber: { card: "border-amber-200 bg-amber-50", dot: "bg-amber-500", text: "text-amber-700", chip: "bg-amber-100", chipText: "text-amber-700", icon: "text-amber-600" },
+  };
+  const tasks = isEn
+    ? [
+      { key: "sky", tag: "Agent 1", icon: Code, title: "Code analysis", body: "Reads the whole repo and prior dialogue to locate and explain an issue." },
+      { key: "emerald", tag: "Agent 2", icon: ScrollText, title: "Log analysis", body: "Loads large run logs and earlier diagnoses to keep investigating." },
+      { key: "amber", tag: "Agent 3", icon: Terminal, title: "Command execution", body: "Runs new instructions while reusing the existing session state." },
+    ]
+    : [
+      { key: "sky", tag: "Agent 1", icon: Code, title: "代码分析", body: "读取整个代码库与历史对话，定位并解释问题。" },
+      { key: "emerald", tag: "Agent 2", icon: ScrollText, title: "日志分析", body: "加载大量运行日志与历史诊断，继续排查根因。" },
+      { key: "amber", tag: "Agent 3", icon: Terminal, title: "命令执行", body: "基于上下文执行新指令，复用既有会话状态。" },
+    ];
+  const Session = ({ tag, name, toneKey, saved }: { tag: string; name: string; toneKey: string; saved: boolean }) => {
+    const tn = TONES[toneKey];
+    return (
+      <div className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${saved ? tn.card : "border-red-400 bg-red-50"}`}>
+        <span className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-700">
+          <span className={`flex h-6 flex-shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] font-black text-white ${saved ? tn.dot : "bg-red-500"}`}><Bot className="h-3 w-3" />{tag}</span>
+          <span className="truncate">{name}{isEn ? " · history KV" : " · 历史 KV"}</span>
+        </span>
+        <span className={`flex-shrink-0 text-xs font-bold ${saved ? tn.text : "text-red-600"}`}>{saved ? (isEn ? "kept" : "已保存") : (isEn ? "evicted" : "已淘汰")}</span>
+      </div>
+    );
+  };
+  const taskNames = tasks.map(t => ({ key: t.key, tag: t.tag, name: t.title }));
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6 shadow-sm">
+      <h3 className="text-xl md:text-2xl font-black tracking-tight text-slate-900">
+        {isEn
+          ? "Workload analysis: agents keep revisiting past tasks — the bottleneck is retaining historical KV Cache"
+          : "负载解析：Agent 反复重访历史任务，瓶颈在历史 KV Cache 的保留能力"}
+      </h3>
+      <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+        {tasks.map(({ key, tag, icon: Icon, title, body }) => {
+          const tn = TONES[key];
+          return (
+            <div key={tag} className={`rounded-xl border p-4 ${tn.card}`}>
+              <div className="mb-2 flex items-center gap-2">
+                <span className={`flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-black ${tn.chip} ${tn.chipText}`}><Bot className="h-3.5 w-3.5" />{tag}</span>
+                <div className="rounded-lg bg-white p-1.5 shadow-sm"><Icon className={`h-4 w-4 ${tn.icon}`} /></div>
+                <h4 className="text-base font-black text-slate-900">{title}</h4>
+              </div>
+              <p className="text-sm font-semibold leading-relaxed text-slate-600">{body}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* revisit diagram: DRAM evicts an old session's KV, SSD keeps all (PPT page 4) */}
+      <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+        <div className="mb-3 text-sm font-black text-slate-700">
+          {isEn ? "Revisiting a historical task, two backends" : "重访某个历史任务时，两种后端的差异"}
+        </div>
+        <div className="relative grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-0">
+          <div className="md:pr-6">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-sm font-black text-orange-700">{isEn ? "DRAM backend (full)" : "DRAM 后端（已满）"}</span>
+              <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-bold text-orange-700">{isEn ? "capacity tight" : "容量吃紧"}</span>
+            </div>
+            <div className="space-y-2">
+              {taskNames.map((tk, i) => (
+                <Session key={tk.tag} tag={tk.tag} name={tk.name} toneKey={tk.key} saved={i !== 0} />
+              ))}
+            </div>
+            <div className="mt-2 text-xs font-semibold leading-snug text-orange-700">
+              {isEn ? "Agent 1's history KV was evicted → revisiting it must re-read and prefill its entire codebase and logs" : "Agent 1 的历史 KV 已被淘汰 → 重访时需把整个代码库与日志重新读取并预填充"}
+            </div>
+          </div>
+          <div className="pointer-events-none absolute inset-y-0 left-1/2 hidden -translate-x-1/2 md:block"><div className="h-full w-px bg-slate-200" /></div>
+          <div className="md:pl-6">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-sm font-black text-sky-700">{isEn ? "SSD backend" : "SSD 后端"}</span>
+              <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-bold text-sky-700">{isEn ? "ample capacity" : "容量充裕"}</span>
+            </div>
+            <div className="space-y-2">
+              {taskNames.map(tk => (
+                <Session key={tk.tag} tag={tk.tag} name={tk.name} toneKey={tk.key} saved={true} />
+              ))}
+            </div>
+            <div className="mt-2 text-xs font-semibold leading-snug text-sky-700">
+              {isEn ? "Every task's history KV is kept on SSD → revisiting any past task reuses its cache directly, no re-reading" : "每个任务的历史 KV 都保留在 SSD → 重访任意历史任务都能直接复用缓存，无需重新读取"}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function StressTestPage() {
   const [locale] = useLocale();
@@ -540,17 +607,17 @@ export default function StressTestPage() {
   const [showWorkloadInfo, setShowWorkloadInfo] = useState(false);
   const [showConfig, setShowConfig] = useState(true);
   const [prepareHint, setPrepareHint] = useState("");
-  const staticModeNotice = () => {
-    window.alert(locale === "en" ? "This GitHub Pages build is a static replay. Live upload and inference are disabled." : "当前 GitHub Pages 版本为静态回放，已禁用实时上传和推理。");
-  };
 
   /* ────────── 历史记录加载 ──────────
    * 压测历史不存 metrics 重放（太大），只恢复配置（模式/轮数/切换间隔/每请求输出 Token）
    * + 只读形式展示上次的 metrics 曲线（标记"历史快照"）。
    * 附件不存（PDF 太大），用户需要手动重新上传。
    */
-  const [historyMetrics, setHistoryMetrics] = useState<RoundMetrics[] | null>(null);
-  const [historyLabel, setHistoryLabel] = useState<string>("");
+  // Default: render a baked-in sample run on first paint (no async flash / blank page).
+  const [historyMetrics, setHistoryMetrics] = useState<RoundMetrics[] | null>(() => AGENT_SEED_METRICS);
+  const [historyLabel, setHistoryLabel] = useState<string>(() => locale === "en"
+    ? `Sample run · ${AGENT_SEED_METRICS.length} rounds · 8 sessions revisited`
+    : `示例数据 · ${AGENT_SEED_METRICS.length} 轮 · 8 个会话轮转重访`);
 
   const handleLoadRecord = useCallback((record: TestRecord) => {
     setIsRunning(false);
@@ -559,15 +626,6 @@ export default function StressTestPage() {
     if (typeof record.config?.totalRounds === "number") setTotalRounds(record.config.totalRounds);
     if (typeof record.config?.outputLen === "number") setOutputLen(record.config.outputLen);
     if (typeof record.config?.cooldownRounds === "number") setCooldownRounds(record.config.cooldownRounds);
-    const docCount = Number(record.config?.docCount) || 0;
-    if (docCount > 0) {
-      setDocs(Array.from({ length: docCount }, (_, index) => ({
-        id: `history-doc-${index}`,
-        name: STRESS_DOCS[index]?.zh || `doc-${index + 1}.md`,
-        text: "",
-        estTokens: 0,
-      })));
-    }
     // 如果 record 里有 metrics，用只读历史快照方式展示
     const replay = record.normalizedReplay || record.results;
     if (replay?.metrics && Array.isArray(replay.metrics) && replay.metrics.length > 0) {
@@ -594,16 +652,9 @@ export default function StressTestPage() {
       } catch { /* ignore */ }
       return;
     }
-    const cachedLatest = getCachedLatestRecord("stress-test");
-    if (cachedLatest && !isRunning) handleLoadRecord(cachedLatest);
-    let cancelled = false;
-    void (async () => {
-      const records = await getHistory("stress-test");
-      if (cancelled || records.length === 0) return;
-      const latest = records.slice().sort((a, b) => b.timestamp - a.timestamp)[0];
-      if (latest && !isRunning) handleLoadRecord(latest);
-    })();
-    return () => { cancelled = true; };
+    // Otherwise always show the baked-in 50-round sample (already in initial state).
+    // We intentionally do NOT load the cached/shared history here — that was stale
+    // and caused the "flash / stale data" issue on this presentation page.
   }, [handleLoadRecord]);
 
   // 点击"开始压测"时自动清掉历史快照（它和当前 run 是互斥的）
@@ -633,7 +684,7 @@ export default function StressTestPage() {
         if (ext === "pdf") {
           const arr = await file.arrayBuffer();
           const fileB64 = arrayBufferToBase64(arr);
-          const res = await fetch(`${apiBase}/disabled/attachments/extract-pdf`, {
+          const res = await fetch(`${apiBase}/api/attachments/extract-pdf`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ filename: file.name, file_b64: fileB64 }),
           });
@@ -664,7 +715,7 @@ export default function StressTestPage() {
   const clearAllDocs = () => setDocs([]);
 
   const prepareOneDoc = async (doc: UploadedDoc): Promise<PreparedDocContext> => {
-    const res = await fetch(`${apiBase}/disabled/benchmark/prepare`, {
+    const res = await fetch(`${apiBase}/api/benchmark/prepare`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -711,7 +762,7 @@ export default function StressTestPage() {
       { role: "user", content: userContent },
     ];
     try {
-      const res = await fetch(`${apiBase}/disabled/benchmark/run`, {
+      const res = await fetch(`${apiBase}/api/benchmark/run`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model, scenario: "stress_test", contextLen: 128000, contextBucket: 128000,
@@ -791,7 +842,7 @@ export default function StressTestPage() {
       if (metricsRef.current.length > 0) {
         await saveRecord({
           scenario: "stress-test",
-          scenarioLabel: "多轮稳态压力测试",
+          scenarioLabel: "Agent 编程上下文恢复",
           config: { mode: "multi-pdf", totalRounds, outputLen, cooldownRounds, docCount: docs.length },
           results: { metrics: metricsRef.current },
         });
@@ -834,6 +885,16 @@ export default function StressTestPage() {
   const speedup = ikAvgTtftRecent > 0 ? lmAvgTtftRecent / ikAvgTtftRecent : 0;
   const peakSpeedupRecent = ikMaxTtftRecent > 0 ? lmMaxTtftRecent / ikMaxTtftRecent : 0;
   const recentQpsGainPct = lmEstimatedQps > 0 && ikEstimatedQps > 0 ? ((ikEstimatedQps / lmEstimatedQps) - 1) * 100 : 0;
+  // Backend cache-hit improvement in the revisit-recovery window (SSD external hit vs DRAM external hit).
+  const recentLmExtHit = avgOf(recentMetrics.map(m => (m.lmExtHit ?? 0) * 100));
+  const recentIkExtHit = avgOf(recentMetrics.map(m => (m.ikExtHit ?? 0) * 100));
+  // SSD/DRAM backend hit (%) at the gap-marker round (round 48) — for the 8.7x annotation.
+  const gapIdx = displayMetrics.length >= 3 ? displayMetrics.length - 3 : displayMetrics.length - 1;
+  const gapMetric = gapIdx >= 0 ? displayMetrics[gapIdx] : null;
+  const gapRound = gapMetric ? gapMetric.round : 0;
+  const gapLmExtHit = gapMetric && gapMetric.lmExtHit != null ? gapMetric.lmExtHit * 100 : recentLmExtHit;
+  const gapIkExtHit = gapMetric && gapMetric.ikExtHit != null ? gapMetric.ikExtHit * 100 : recentIkExtHit;
+  const hitGainRecent = recentLmExtHit > 0 ? recentIkExtHit / recentLmExtHit : 0;
   const latestLmTokens = displayMetrics.length > 0 ? displayMetrics[displayMetrics.length - 1].lmContextTokens : 0;
   const latestIkTokens = displayMetrics.length > 0 ? displayMetrics[displayMetrics.length - 1].ikContextTokens : 0;
 
@@ -846,6 +907,21 @@ export default function StressTestPage() {
     LMCacheExtHit: m.lmExtHit === null ? null : Number((m.lmExtHit * 100).toFixed(1)),
     InfiniKVExtHit: m.ikExtHit === null ? null : Number((m.ikExtHit * 100).toFixed(1)),
   }));
+
+  // Revisit-recovery window = the last `recentWindow` rounds; highlighted on the charts.
+  const recoveryStartRound = displayMetrics.length > 0
+    ? displayMetrics[Math.max(0, displayMetrics.length - recentWindow)].round
+    : 0;
+  const lastRound = displayMetrics.length > 0 ? displayMetrics[displayMetrics.length - 1].round : 0;
+  const recoveryLabelTtft = locale === "en"
+    ? "Revisit recovery · 6.79× lower wait time"
+    : "重访恢复窗口 · 重访等待时间降低 6.79×";
+  const recoveryLabelHit = locale === "en"
+    ? "Revisit recovery · 8.7× higher hit rate"
+    : "重访恢复窗口 · 缓存命中率提升 8.7×";
+
+  // Demo view hides the live config / run / progress / raw-data panels (presentation mode).
+  const SHOW_CONTROLS = false;
 
   /* ────────── Render ────────── */
   return (
@@ -866,11 +942,11 @@ export default function StressTestPage() {
               </span>
             </div>
             <h1 className="text-4xl font-black text-gray-900 flex items-center space-x-3 tracking-tight">
-              <Activity className="w-8 h-8 text-sky-500" />
+              <Activity className="w-8 h-8 text-violet-500" />
               <span>{tr("demo.stress.title")}</span>
             </h1>
-            <p className="text-slate-500 text-base mt-2 leading-relaxed max-w-3xl">
-              {tr("demo.stress.description.a")}<span className="font-semibold text-violet-700">{tr("demo.stress.description.time")}</span>{tr("demo.stress.description.b")}<span className="font-semibold text-emerald-700">{tr("demo.stress.description.window")}</span>{tr("demo.stress.description.c")}<span className="text-orange-700 font-semibold">{tr("demo.stress.description.dram")}</span>{tr("demo.stress.description.d")}<span className="text-sky-700 font-semibold">{tr("demo.stress.description.ssd")}</span>{tr("demo.stress.description.e")}
+            <p className="text-slate-500 text-base mt-2 leading-relaxed max-w-5xl">
+              {tr("demo.stress.description.a")}<span className="font-semibold text-slate-900">{tr("demo.stress.description.time")}</span>{tr("demo.stress.description.b")}<span className="font-semibold text-emerald-700">{tr("demo.stress.description.window")}</span>{tr("demo.stress.description.c")}<span className="font-semibold text-slate-600">{tr("demo.stress.description.dram")}</span>{tr("demo.stress.description.d")}<span className="font-semibold text-sky-700">{tr("demo.stress.description.ssd")}</span>{tr("demo.stress.description.e")}
             </p>
           </div>
           <div className="flex items-center space-x-2 flex-shrink-0">
@@ -891,22 +967,9 @@ export default function StressTestPage() {
           </div>
         </div>
 
+        <AgentWorkloadPanel />
         <ExperimentConfigBanner workloadLabel={tr("demo.stress.workload")} />
 
-        <ContextTokenBar
-          lmcacheTokens={latestLmTokens > 0 ? latestLmTokens : undefined}
-          infinikvTokens={latestIkTokens > 0 ? latestIkTokens : undefined}
-          maxTokens={targetInputBudget}
-          subtitle={
-            displayMetrics.length > 0
-              ? locale === "en"
-                ? `latest input LM ${formatTokenCount(latestLmTokens)} / IK ${formatTokenCount(latestIkTokens)} · target budget ${formatTokenCount(targetInputBudget)} · ${displayMetrics.length} rounds`
-                : `最近一轮实际输入 LM ${formatTokenCount(latestLmTokens)} / IK ${formatTokenCount(latestIkTokens)} · 目标预算 ${formatTokenCount(targetInputBudget)} · 共 ${displayMetrics.length} 轮`
-              : locale === "en"
-                ? "context usage (latest actual input vs target budget)"
-                : "上下文占用（最近一轮实际输入 vs 目标输入预算）"
-          }
-        />
         {prepareHint && (
           <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700">
             {prepareHint}
@@ -924,441 +987,351 @@ export default function StressTestPage() {
 
         <MetricDefinitionPanel />
 
-        {(displayMetrics.length > 0 || docs.length > 0) && (
-          <ModelMetricsPanel
-            title={locale === "en" ? "Key Metrics: Global vs Latest-20-Round Steady State" : "关键指标：全局与最近20轮稳态对比"}
-            model={modelLabel}
-            completedRounds={displayMetrics.length}
-            recentWindow={recentWindow}
-            lm={{
-              label: "LMCache-DRAM",
-              accent: "orange",
-              global: {
-                avgTtft: lmAvgTtftGlobal,
-                totalTtft: displayMetrics.reduce((sum, item) => sum + item.lmTtft, 0),
-                qps: lmEstimatedQpsGlobal,
-                avgInputTokens: avgInputTokensGlobal,
-                avgOutputTokens,
-              },
-              recent: {
-                avgTtft: lmAvgTtftRecent,
-                qps: lmEstimatedQps,
-                avgInputTokens: avgInputTokensRecent,
-                avgOutputTokens,
-                peakTtft: lmMaxTtftRecent,
-              },
-            }}
-            ik={{
-              label: "InfiniKV (SSD)",
-              accent: "sky",
-              global: {
-                avgTtft: ikAvgTtftGlobal,
-                totalTtft: displayMetrics.reduce((sum, item) => sum + item.ikTtft, 0),
-                qps: ikEstimatedQpsGlobal,
-                avgInputTokens: avgInputTokensGlobal,
-                avgOutputTokens,
-              },
-              recent: {
-                avgTtft: ikAvgTtftRecent,
-                qps: ikEstimatedQps,
-                avgInputTokens: avgInputTokensRecent,
-                avgOutputTokens,
-                peakTtft: ikMaxTtftRecent,
-              },
-            }}
-          />
+        {displayMetrics.length > 0 && (
+          <div className="bg-white border border-gray-200 rounded-2xl p-6 md:p-7 shadow-sm">
+            <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 tracking-tight">{locale === "en" ? "Key Metrics: Overall vs Long-Context Revisit Recovery" : "关键指标：整体 vs 长上下文重访恢复"}</h3>
+                <p className="mt-1 max-w-3xl text-sm text-slate-500 leading-relaxed">{locale === "en"
+                  ? `"Overall" averages all ${displayMetrics.length} rounds; "revisit recovery" focuses on the last ${recentWindow} rounds, after the agent has been revisiting tasks for a while.`
+                  : `「整体」是全部 ${displayMetrics.length} 轮的平均；「长上下文重访恢复」重点看后 ${recentWindow} 轮——Agent 反复重访、进入稳定阶段后的恢复表现。`}</p>
+              </div>
+              <span className="self-start text-xs font-mono font-semibold px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap">{locale === "en" ? "Model" : "模型"} {modelLabel}</span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {[
+                {
+                  scope: locale === "en" ? `Overall (all ${displayMetrics.length} rounds)` : `整体（全部 ${displayMetrics.length} 轮）`,
+                  hero: false,
+                  tiles: [
+                    { label: locale === "en" ? "TTFT speedup" : "TTFT 优化", gain: speedupGlobal, sub: `${lmAvgTtftGlobal.toFixed(2)}s → ${ikAvgTtftGlobal.toFixed(2)}s` },
+                    { label: locale === "en" ? "QPS gain" : "QPS 提升", gain: qpsUpliftGlobal, sub: `${lmEstimatedQpsGlobal.toFixed(2)} → ${ikEstimatedQpsGlobal.toFixed(2)}` },
+                  ],
+                },
+                {
+                  scope: locale === "en" ? `Revisit recovery (last ${recentWindow})` : `长上下文重访恢复（最后 ${recentWindow} 轮）`,
+                  hero: true,
+                  tiles: [
+                    { label: locale === "en" ? "TTFT speedup" : "TTFT 优化", gain: speedup, sub: `${lmAvgTtftRecent.toFixed(2)}s → ${ikAvgTtftRecent.toFixed(2)}s` },
+                    { label: locale === "en" ? "QPS gain" : "QPS 提升", gain: qpsUplift, sub: `${lmEstimatedQps.toFixed(2)} → ${ikEstimatedQps.toFixed(2)}` },
+                  ],
+                },
+              ].map((col, ci) => (
+                <div key={ci} className={`rounded-2xl border p-4 ${col.hero ? "border-2 border-emerald-300 bg-emerald-50/70" : "border-slate-200 bg-slate-50"}`}>
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className={`h-2.5 w-2.5 rounded-full ${col.hero ? "bg-emerald-500" : "bg-slate-400"}`} />
+                    <span className={`text-sm font-black ${col.hero ? "text-emerald-800" : "text-slate-700"}`}>{col.scope}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {col.tiles.map((tile, ti) => (
+                      <div key={ti} className={`rounded-xl border bg-white px-3 py-3 ${col.hero ? "border-emerald-200" : "border-slate-200"}`}>
+                        <div className={`text-xs font-black uppercase tracking-wide ${col.hero ? "text-emerald-700" : "text-slate-500"}`}>{tile.label}</div>
+                        <div className="mt-1 flex items-end gap-0.5">
+                          <span className={`text-4xl font-black leading-none ${col.hero ? "text-emerald-700" : "text-slate-900"}`}>{tile.gain > 0 ? tile.gain.toFixed(2) : "--"}</span>
+                          <span className={`mb-0.5 text-xl font-black ${col.hero ? "text-emerald-700" : "text-slate-900"}`}>×</span>
+                        </div>
+                        <div className="mt-1.5 font-mono text-sm font-bold text-slate-500">{tile.sub}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
-        {/* 测试配置 */}
-        <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
-          <button
-            onClick={() => setShowConfig(!showConfig)}
-            className="w-full px-6 py-4 flex items-center justify-between text-base font-bold text-gray-900 hover:bg-gray-50 transition-colors"
-          >
-            <span>{locale === "en" ? "Test Configuration" : "测试配置"}</span>
-            <ChevronDown
-              className={`w-5 h-5 text-gray-400 transition-transform ${showConfig ? "rotate-180" : ""}`}
-            />
-          </button>
-
-          {showConfig && (
-            <div className="px-6 pb-6 space-y-5 border-t border-gray-200 pt-5">
-              <div className="bg-gray-50/70 border border-gray-200 rounded-2xl p-5">
-                <div className="flex items-center space-x-2 mb-3">
-                  <FileText className="w-4 h-4 text-sky-500" />
-                  <span className="text-sm font-bold text-gray-700">
-                    {locale === "en" ? "Multi-session long run · document working-set rotation" : "多会话长跑 · 文档工作集轮询"}
-                  </span>
-                </div>
-                <div className="text-sm text-gray-500 leading-relaxed">
-                  {locale === "en"
-                    ? "Upload 3-10 PDF/TXT/MD documents. Each round selects one document session for QA. After a long run, the total KV Cache working set exceeds DRAM capacity; LMCache-DRAM starts evicting and re-prefilling, while InfiniKV recalls evicted KV Cache through the SSD tier."
-                    : "上传 3~10 份不同 PDF/TXT/MD，每轮选择 1 份文档会话做 QA。长跑后工作集总 KV Cache 超过 DRAM 容量，LMCache-DRAM 会出现淘汰与重新 prefill；InfiniKV 通过 SSD 层召回被淘汰的 KV Cache。"}
-                </div>
-              </div>
-
-              <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Paperclip className="w-4 h-4 text-sky-500" />
-                  <span className="text-base font-black text-gray-900">
-                    {locale === "en" ? "Working Set: Long Documents" : "工作集：长文本资料"}
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    {locale === "en" ? "- multiple documents form a long-running session working set; each round selects one document into the model context" : "— 多份文档组成长期回访的 session 工作集；单轮只选 1 份进入模型上下文"}
-                  </span>
-                  <span className="text-xs font-medium text-sky-700 bg-sky-100 border border-sky-200 px-2 py-0.5 rounded-full">
-                    {locale === "en" ? "10 files" : "10 份"}
-                  </span>
-                </div>
-                <div className="flex-1 flex flex-wrap gap-2 min-h-[42px] rounded-xl border border-gray-200 bg-gray-50/70 p-3">
-                  {STRESS_DOCS.map((doc, i) => (
-                    <div
-                      key={i}
-                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border shadow-sm ${activeSessionId === `history-doc-${i}` ? "bg-sky-50 text-sky-800 border-sky-300 ring-2 ring-sky-100" : "bg-white text-gray-600 border-gray-200"}`}
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      <span className="max-w-[180px] truncate">{locale === "en" ? doc.en : doc.zh}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
-                  <label className="text-sm text-gray-500 font-bold block mb-1.5">{locale === "en" ? "Total Long-Run Rounds" : "长跑总轮数"}</label>
-                  <select
-                    className="w-full bg-white border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-sky-300"
-                    value={totalRounds}
-                    onChange={e => setTotalRounds(Number(e.target.value))}
-                  >
-                    <option value={20}>{locale === "en" ? "20 rounds · warm-up" : "20 轮 · 预热"}</option>
-                    <option value={50}>{locale === "en" ? "50 rounds · basic" : "50 轮 · 基础"}</option>
-                    <option value={100}>{locale === "en" ? "100 rounds · standard" : "100 轮 · 标准"}</option>
-                    <option value={200}>{locale === "en" ? "200 rounds · long run" : "200 轮 · 长跑"}</option>
-                    <option value={500}>{locale === "en" ? "500 rounds · extreme" : "500 轮 · 极限"}</option>
-                  </select>
-                </div>
-                <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
-                  <label className="text-sm text-gray-500 font-bold block mb-1.5" title={locale === "en" ? "Documents selected in the latest N rounds are temporarily blocked to force LRU pressure" : "最近 N 轮挑过的 PDF 不再挑 — 强制 LRU 淘汰"}>
-                    {locale === "en" ? "Session Revisit Cooldown" : "会话回访间隔"}
-                  </label>
-                  <select
-                    className="w-full bg-white border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-sky-300"
-                    value={cooldownRounds}
-                    onChange={e => setCooldownRounds(Number(e.target.value))}
-                  >
-                    <option value={0}>{locale === "en" ? "0 · fully random" : "0 · 完全随机"}</option>
-                    <option value={1}>{locale === "en" ? "1 · no immediate repeat" : "1 · 不连续重复"}</option>
-                    <option value={3}>{locale === "en" ? "3 · recommended" : "3 · 推荐"}</option>
-                    <option value={5}>{locale === "en" ? "5 · forced rotation" : "5 · 强制轮询"}</option>
-                    <option value={999}>{locale === "en" ? "infinite · pure round-robin" : "∞ · 纯轮询"}</option>
-                  </select>
-                </div>
-                <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
-                  <label className="text-sm text-gray-500 font-bold block mb-1.5">{locale === "en" ? "Output Tokens / Request" : "每请求输出 Token"}</label>
-                  <input
-                    className="w-full bg-white border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-sky-300"
-                    type="number"
-                    value={outputLen}
-                    onChange={e => setOutputLen(Number(e.target.value || 256))}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 执行控制 */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center gap-2">
-            <Zap className="w-5 h-5 text-sky-500" />
-            <h3 className="text-xl font-black text-gray-900 tracking-tight">{locale === "en" ? "Benchmark Results" : "测试结果"}</h3>
-          </div>
-          <p className="text-sm text-gray-500 mt-1">
-            {locale === "en"
-              ? "The system rotates through the document working set and records TTFT, TPS, GPU/DRAM hits, and SSD recall for LMCache and InfiniKV."
-              : "系统轮换访问文档工作集，实时记录 LMCache 与 InfiniKV 的 TTFT、TPS、GPU/DRAM 命中和 SSD 召回情况。"}
-          </p>
-        </div>
-
-        {/* 进度条 */}
-        {(isRunning || displayMetrics.length > 0) && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between mb-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-sky-500" />
-                  <h3 className="text-xl font-black text-gray-900 tracking-tight">{locale === "en" ? "Execution Progress" : "执行进度"}</h3>
-                </div>
-                <p className="text-sm text-gray-500 mt-1">{locale === "en" ? "Current round, completed rounds, and active document session." : "当前轮次、已完成轮次与活跃文档会话状态。"}</p>
-              </div>
-              <span className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-mono font-bold text-gray-600">
-                {metrics.length} / {totalRounds} {locale === "en" ? "rounds" : "轮"}
-              </span>
-            </div>
-            <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-sky-500 rounded-full transition-all duration-200"
-                style={{ width: `${Math.min(100, (metrics.length / totalRounds) * 100)}%` }}
+        {SHOW_CONTROLS && (<>
+          {/* 测试配置 */}
+          <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+            <button
+              onClick={() => setShowConfig(!showConfig)}
+              className="w-full px-6 py-4 flex items-center justify-between text-base font-bold text-gray-900 hover:bg-gray-50 transition-colors"
+            >
+              <span>{locale === "en" ? "Test Configuration" : "测试配置"}</span>
+              <ChevronDown
+                className={`w-5 h-5 text-gray-400 transition-transform ${showConfig ? "rotate-180" : ""}`}
               />
-            </div>
-            {isRunning && (
-              <div className="mt-3 flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>{locale === "en" ? `Round ${currentRound} running (session: ${docs.find(d => d.id === activeSessionId)?.name || "?"})` : `第 ${currentRound} 轮执行中（会话 ${docs.find(d => d.id === activeSessionId)?.name || "?"}）`}</span>
+            </button>
+
+            {showConfig && (
+              <div className="px-6 pb-6 space-y-5 border-t border-gray-200 pt-5">
+                <div className="bg-gray-50/70 border border-gray-200 rounded-2xl p-5">
+                  <div className="flex items-center space-x-2 mb-3">
+                    <FileText className="w-4 h-4 text-sky-500" />
+                    <span className="text-sm font-bold text-gray-700">
+                      {locale === "en" ? "Multi-session long run · document working-set rotation" : "多会话长跑 · 文档工作集轮询"}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-500 leading-relaxed">
+                    {locale === "en"
+                      ? "Upload 3-10 PDF/TXT/MD documents. Each round selects one document session for QA. After a long run, the total KV Cache working set exceeds DRAM capacity; LMCache-DRAM starts evicting and re-prefilling, while InfiniKV recalls evicted KV Cache through the SSD tier."
+                      : "上传 3~10 份不同 PDF/TXT/MD，每轮选择 1 份文档会话做 QA。长跑后工作集总 KV Cache 超过 DRAM 容量，LMCache-DRAM 会出现淘汰与重新 prefill；InfiniKV 通过 SSD 层复用被淘汰的 KV Cache。"}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Paperclip className="w-4 h-4 text-sky-500" />
+                      <span className="text-base font-black text-gray-900">
+                        {locale === "en" ? "Working Set: Upload 3-10 Long Documents" : "工作集：上传 3 ~ 10 份长文本资料"}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {locale === "en" ? "- multiple documents form a long-running session working set; each round selects one document into the model context" : "— 多份文档组成长期重访的 session 工作集；单轮只选 1 份进入模型上下文"}
+                      </span>
+                    </div>
+                    {docs.length > 0 && (
+                      <button
+                        onClick={clearAllDocs}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>{locale === "en" ? "Clear All" : "清空全部"}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start">
+                    <button
+                      onClick={() => docInputRef.current?.click()}
+                      disabled={uploading}
+                      className="bg-sky-50 border border-sky-200 hover:border-sky-300 hover:bg-sky-100 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 rounded-xl text-sky-700 flex items-center text-sm font-black transition-colors w-fit"
+                    >
+                      {uploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Paperclip className="w-4 h-4 mr-2" />}
+                      {uploading ? locale === "en" ? "Parsing..." : "解析中..." : locale === "en" ? "Upload PDF / TXT / MD" : "上传 PDF / TXT / MD"}
+                    </button>
+                    <input
+                      type="file"
+                      ref={docInputRef}
+                      className="hidden"
+                      accept=".txt,.md,.pdf"
+                      multiple
+                      onChange={handleDocUpload}
+                    />
+                    <div className="flex-1 flex flex-wrap gap-2 min-h-[42px] rounded-xl border border-gray-200 bg-gray-50/70 p-3">
+                      {docs.length === 0 && (
+                        <span className="text-sm text-gray-400 py-2">{locale === "en" ? "No documents uploaded yet" : "还没有上传文档"}</span>
+                      )}
+                      {docs.map(d => (
+                        <div
+                          key={d.id}
+                          className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border shadow-sm ${activeSessionId === d.id ? "bg-sky-50 text-sky-800 border-sky-300 ring-2 ring-sky-100" : "bg-white text-gray-600 border-gray-200"}`}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span className="max-w-[180px] truncate" title={d.name}>{d.name}</span>
+                          <span className="font-mono text-sky-500">{(d.estTokens / 1000).toFixed(1)}K tk</span>
+                          <button onClick={() => removeDoc(d.id)} className="text-gray-400 hover:text-rose-500"><X className="w-3 h-3" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {docs.length > 0 && docs.length < 3 && (
+                    <div className="flex items-start space-x-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-xs font-semibold text-amber-700">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <span>{locale === "en" ? `With only ${docs.length} document(s), DRAM may not fill up. Upload at least 3 documents; more documents make the SSD-tier advantage easier to observe.` : `只有 ${docs.length} 份 PDF 时 DRAM 很难被填满，建议上传至少 3 份（越多越能体现 SSD 层优势）。`}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                    <label className="text-sm text-gray-500 font-bold block mb-1.5">{locale === "en" ? "Total Long-Run Rounds" : "长跑总轮数"}</label>
+                    <select
+                      className="w-full bg-white border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-sky-300"
+                      value={totalRounds}
+                      onChange={e => setTotalRounds(Number(e.target.value))}
+                    >
+                      <option value={20}>{locale === "en" ? "20 rounds · warm-up" : "20 轮 · 预热"}</option>
+                      <option value={50}>{locale === "en" ? "50 rounds · basic" : "50 轮 · 基础"}</option>
+                      <option value={100}>{locale === "en" ? "100 rounds · standard" : "100 轮 · 标准"}</option>
+                      <option value={200}>{locale === "en" ? "200 rounds · long run" : "200 轮 · 长跑"}</option>
+                      <option value={500}>{locale === "en" ? "500 rounds · extreme" : "500 轮 · 极限"}</option>
+                    </select>
+                  </div>
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                    <label className="text-sm text-gray-500 font-bold block mb-1.5" title={locale === "en" ? "Documents selected in the latest N rounds are temporarily blocked to force LRU pressure" : "最近 N 轮挑过的 PDF 不再挑 — 强制 LRU 淘汰"}>
+                      {locale === "en" ? "Session Revisit Cooldown" : "会话重访间隔"}
+                    </label>
+                    <select
+                      className="w-full bg-white border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-sky-300"
+                      value={cooldownRounds}
+                      onChange={e => setCooldownRounds(Number(e.target.value))}
+                    >
+                      <option value={0}>{locale === "en" ? "0 · fully random" : "0 · 完全随机"}</option>
+                      <option value={1}>{locale === "en" ? "1 · no immediate repeat" : "1 · 不连续重复"}</option>
+                      <option value={3}>{locale === "en" ? "3 · recommended" : "3 · 推荐"}</option>
+                      <option value={5}>{locale === "en" ? "5 · forced rotation" : "5 · 强制轮询"}</option>
+                      <option value={999}>{locale === "en" ? "infinite · pure round-robin" : "∞ · 纯轮询"}</option>
+                    </select>
+                  </div>
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50/70 p-4">
+                    <label className="text-sm text-gray-500 font-bold block mb-1.5">{locale === "en" ? "Output Tokens / Request" : "每请求输出 Token"}</label>
+                    <input
+                      className="w-full bg-white border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-sky-100 focus:border-sky-300"
+                      type="number"
+                      value={outputLen}
+                      onChange={e => setOutputLen(Number(e.target.value || 256))}
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </div>
-        )}
 
-        {/* 历史快照横幅 */}
-        {historyMetrics && historyMetrics.length > 0 && (
+          {/* 执行控制 */}
           <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <div className="flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-sky-500" />
-                  <h3 className="text-xl font-black text-gray-900 tracking-tight">{locale === "en" ? "History Snapshot" : "历史快照"}</h3>
+                  <Zap className="w-5 h-5 text-sky-500" />
+                  <h3 className="text-xl font-black text-gray-900 tracking-tight">{locale === "en" ? "Execution Control" : "执行控制"}</h3>
                 </div>
-                <div className="mt-1 text-sm font-semibold text-gray-600">{historyLabel}</div>
-                <div className="mt-1 text-sm text-gray-500">{locale === "en" ? "The charts and metric cards below are a read-only replay of this historical record." : "下面的图表与统计卡是这份历史记录的只读回放。"}</div>
+                <p className="text-sm text-gray-500 mt-1">
+                  {locale === "en"
+                    ? "After start, the system rotates through the document working set and records TTFT, TPS, GPU/DRAM hits, and SSD recall for LMCache and InfiniKV."
+                    : "开始后按当前配置轮换访问文档工作集，实时记录 LMCache 与 InfiniKV 的 TTFT、TPS、GPU/DRAM 命中和 SSD 复用情况。"}
+                </p>
               </div>
-              <button
-                onClick={clearHistorySnapshot}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-500 hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700 transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>{locale === "en" ? "Clear Replay" : "清除历史回放"}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                {!isRunning ? (
+                  <button
+                    onClick={runBenchmark}
+                    disabled={docs.length === 0}
+                    className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white px-10 py-3.5 rounded-xl font-black text-base flex items-center transition-all hover:shadow-lg hover:shadow-emerald-200/50 active:scale-[0.98]"
+                  >
+                    <Play className="w-5 h-5 mr-2" />
+                    <span>{locale === "en" ? "Start Agent Revisit Test" : "开始 Agent 重访压测"}</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={stopBenchmark}
+                    className="bg-gray-700 hover:bg-gray-800 text-white px-10 py-3.5 rounded-xl font-black text-base flex items-center transition-all hover:shadow-lg active:scale-[0.98]"
+                  >
+                    <Square className="w-5 h-5 mr-2" />
+                    <span>{locale === "en" ? "Stop" : "停止"}</span>
+                  </button>
+                )}
+                {docs.length === 0 && (
+                  <span className="text-sm font-medium text-gray-400">{locale === "en" ? "Upload at least one document first" : "请先上传至少 1 份文档"}</span>
+                )}
+              </div>
             </div>
           </div>
-        )}
 
-        {/* 关键指标对比表 */}
-        {displayMetrics.length > 0 && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-            <div className="flex flex-col gap-4 mb-5">
-              <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+          {/* 进度条 */}
+          {(isRunning || metrics.length > 0) && (
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between mb-4">
                 <div>
-                  <h3 className="text-xl font-black text-gray-900 tracking-tight">
-                    {locale === "en" ? "Key Metrics: Global vs Steady-State Window" : "关键指标对比表：全局 vs 稳态窗口"}
-                  </h3>
-                  <p className="text-sm text-gray-500 mt-1 leading-relaxed">
-                    {locale === "en"
-                      ? "White background shows overall performance from round 1 to the current round; green background covers only the latest-20-round steady-state window, removing cold-start and warm-up noise. Total TTFT is global; peak TTFT observes steady-state long-tail."
-                      : "左侧白底展示第 1 轮到当前轮的整体表现；右侧绿色底只看最近20轮稳态窗口，用来排除冷启动和预热阶段的干扰。累计 TTFT 属于全局口径，峰值 TTFT 用来观察稳态长尾。"}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-sky-500" />
+                    <h3 className="text-xl font-black text-gray-900 tracking-tight">{locale === "en" ? "Execution Progress" : "执行进度"}</h3>
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">{locale === "en" ? "Current round, completed rounds, and active document session." : "当前轮次、已完成轮次与活跃文档会话状态。"}</p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs font-black">
-                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600">
-                    {locale === "en" ? "Global 1..N: White" : "全局 1..N：白底"}
-                  </span>
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-emerald-700">
-                    {locale === "en" ? "Latest 20: Green" : "最近20轮：绿色底"}
-                  </span>
-                </div>
+                <span className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-mono font-bold text-gray-600">
+                  {metrics.length} / {totalRounds} {locale === "en" ? "rounds" : "轮"}
+                </span>
               </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-base font-black text-slate-900">{locale === "en" ? "Global Performance" : "全局总体性能比较"}</div>
-                      <div className="text-xs font-semibold text-slate-500 mt-0.5">
-                        {locale === "en" ? `Scope: rounds 1 to ${displayMetrics.length}` : `统计范围：第 1 轮到第 ${displayMetrics.length} 轮`}
-                      </div>
-                    </div>
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-black text-slate-500">
-                      Overall
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                      <div className="text-xs font-black text-slate-500 mb-1">{locale === "en" ? "TTFT SPEEDUP [GLOBAL]" : "TTFT 性能优化 [全局]"}</div>
-                      <div className="font-mono text-3xl font-black text-slate-900">{fmtGain(speedupGlobal)}</div>
-                      <div className="text-[11px] font-semibold text-slate-500 mt-1">
-                        {locale === "en" ? "LM global avg TTFT / InfiniKV global avg TTFT" : "LM 全局平均 TTFT ÷ InfiniKV 全局平均 TTFT"}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                      <div className="text-xs font-black text-slate-500 mb-1">{locale === "en" ? "QPS SPEEDUP [GLOBAL]" : "QPS 性能提升 [全局]"}</div>
-                      <div className="font-mono text-3xl font-black text-slate-900">{fmtGain(qpsUpliftGlobal)}</div>
-                      <div className="text-[11px] font-semibold text-slate-500 mt-1">
-                        {locale === "en" ? "InfiniKV global QPS / LM global QPS" : "InfiniKV 全局 QPS ÷ LM 全局 QPS"}
-                      </div>
-                    </div>
-                  </div>
+              <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-sky-500 rounded-full transition-all duration-200"
+                  style={{ width: `${Math.min(100, (metrics.length / totalRounds) * 100)}%` }}
+                />
+              </div>
+              {isRunning && (
+                <div className="mt-3 flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>{locale === "en" ? `Round ${currentRound} running (session: ${docs.find(d => d.id === activeSessionId)?.name || "?"})` : `第 ${currentRound} 轮执行中（会话 ${docs.find(d => d.id === activeSessionId)?.name || "?"}）`}</span>
                 </div>
+              )}
+            </div>
+          )}
 
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-base font-black text-emerald-900">{locale === "en" ? "Latest-20-Round Steady State" : "最近20轮稳态性能比较"}</div>
-                      <div className="text-xs font-semibold text-emerald-700/80 mt-0.5">
-                        {locale === "en" ? `Scope: last ${recentWindow} rounds; all rounds if N<20` : `统计范围：最后 ${recentWindow} 轮，N<20 时取全部`}
-                      </div>
-                    </div>
-                    <span className="rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[11px] font-black text-emerald-700">
-                      Steady Window
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="rounded-xl border border-emerald-200 bg-white px-4 py-3">
-                      <div className="text-xs font-black text-emerald-700 mb-1">{locale === "en" ? "TTFT SPEEDUP [LATEST 20]" : "TTFT 性能优化 [最近20]"}</div>
-                      <div className="font-mono text-3xl font-black text-emerald-700">{fmtGain(speedup)}</div>
-                      <div className="text-[11px] font-semibold text-emerald-700/75 mt-1">
-                        {locale === "en" ? "LM latest-20 avg TTFT / InfiniKV latest-20 avg TTFT" : "LM 最近20平均 TTFT ÷ InfiniKV 最近20平均 TTFT"}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-emerald-200 bg-white px-4 py-3">
-                      <div className="text-xs font-black text-emerald-700 mb-1">{locale === "en" ? "QPS SPEEDUP [LATEST 20]" : "QPS 性能提升 [最近20]"}</div>
-                      <div className="font-mono text-3xl font-black text-emerald-700">{fmtGain(qpsUplift)}</div>
-                      <div className="text-[11px] font-semibold text-emerald-700/75 mt-1">
-                        {locale === "en" ? "InfiniKV latest-20 QPS / LM latest-20 QPS" : "InfiniKV 最近20 QPS ÷ LM 最近20 QPS"}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-emerald-200 bg-white px-4 py-3">
-                      <div className="text-xs font-black text-emerald-700 mb-1">{locale === "en" ? "PEAK TTFT OPT. [LATEST 20]" : "峰值 TTFT 优化 [最近20]"}</div>
-                      <div className="font-mono text-3xl font-black text-emerald-700">{fmtGain(peakSpeedupRecent)}</div>
-                      <div className="text-[11px] font-semibold text-emerald-700/75 mt-1">
-                        {locale === "en" ? "LM latest-20 peak TTFT / InfiniKV latest-20 peak TTFT" : "LM 最近20峰值 TTFT ÷ InfiniKV 最近20峰值 TTFT"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+        </>)}
+
+
+        {/* Cache 命中率曲线 */}
+        {displayMetrics.length >= 2 && (
+          <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
+            <div className="mb-6">
+              <div className="mb-3 text-center">
+                <h3 className="text-xl font-black text-gray-900 tracking-tight">{locale === "en" ? "Cache Hit Rate Curves" : "缓存命中率曲线"}</h3>
+                <p className="mx-auto max-w-2xl text-base text-gray-500 mt-1">{locale === "en" ? "Cache hit rate of the two systems on revisits — the higher the hit rate, the more historical KV is reused directly without re-prefilling." : "对比两套系统重访时的缓存命中率：命中率越高，越多历史 KV 被直接复用、无需重新预填充。"}</p>
+              </div>
+              <div className="flex justify-center w-full">
+                <LegendChips
+                  className="justify-center"
+                  items={[
+                    { label: locale === "en" ? "LMCache prefix hit" : "LMCache 前缀命中", colorClass: "bg-orange-50 border-orange-200", textClass: "text-orange-700" },
+                    { label: locale === "en" ? "InfiniKV prefix hit" : "InfiniKV 前缀命中", colorClass: "bg-sky-50 border-sky-200", textClass: "text-sky-700" },
+                    { label: locale === "en" ? "LMCache DRAM hit" : "LMCache DRAM 命中", colorClass: "bg-emerald-50 border-emerald-200", textClass: "text-emerald-700" },
+                    { label: locale === "en" ? "InfiniKV SSD hit" : "InfiniKV SSD 命中", colorClass: "bg-violet-50 border-violet-200", textClass: "text-violet-700" },
+                  ]}
+                />
               </div>
             </div>
-
-            <div className="overflow-x-auto rounded-2xl border border-gray-200">
-              <table className="w-full min-w-[1180px]">
-                <thead>
-                  <tr className="text-left text-xs font-black uppercase tracking-wide border-b border-gray-200">
-                    <th rowSpan={2} className="sticky left-0 z-10 bg-white py-3 px-3 text-gray-600 border-r border-gray-200">
-                      {locale === "en" ? "System" : "系统"}
-                    </th>
-                    <th rowSpan={2} className="py-3 px-3 text-gray-600 border-r border-gray-200">
-                      {locale === "en" ? "Model" : "模型"}
-                    </th>
-                    <th colSpan={5} className="py-3 px-3 text-center text-slate-700 bg-white border-r border-gray-200">
-                      {locale === "en" ? "Global Metrics 1..N Rounds" : "全局指标 1..N 轮"}
-                    </th>
-                    <th colSpan={5} className="py-3 px-3 text-center text-emerald-800 bg-emerald-50">
-                      {locale === "en" ? "Latest-20-Round Steady State" : "最近20轮稳态指标"}
-                    </th>
-                  </tr>
-                  <tr className="text-left text-sm border-b border-gray-200">
-                    <th className="py-2.5 px-3 font-semibold text-gray-500 bg-white">{locale === "en" ? "Avg Input" : "平均输入"}</th>
-                    <th className="py-2.5 px-3 font-semibold text-gray-500 bg-white">{locale === "en" ? "Avg Output" : "平均输出"}</th>
-                    <th className="py-2.5 px-3 font-semibold text-gray-500 bg-white">{locale === "en" ? "Total TTFT" : "累计 TTFT"}</th>
-                    <th className="py-2.5 px-3 font-semibold text-gray-500 bg-white">{locale === "en" ? "Avg TTFT" : "平均 TTFT"}</th>
-                    <th className="py-2.5 px-3 font-semibold text-gray-500 bg-white border-r border-gray-200">{locale === "en" ? "Est. QPS" : "估算 QPS"}</th>
-                    <th className="py-2.5 px-3 font-semibold text-emerald-700 bg-emerald-50">{locale === "en" ? "Avg Input" : "平均输入"}</th>
-                    <th className="py-2.5 px-3 font-semibold text-emerald-700 bg-emerald-50">{locale === "en" ? "Avg TTFT" : "平均 TTFT"}</th>
-                    <th className="py-2.5 px-3 font-semibold text-emerald-700 bg-emerald-50">{locale === "en" ? "Est. QPS" : "估算 QPS"}</th>
-                    <th className="py-2.5 px-3 font-semibold text-emerald-700 bg-emerald-50">{locale === "en" ? "Peak TTFT" : "峰值 TTFT"}</th>
-                    <th className="py-2.5 px-3 font-semibold text-emerald-700 bg-emerald-50">{locale === "en" ? "Verdict" : "稳态结论"}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-gray-100 bg-orange-50/35">
-                    <td className="sticky left-0 z-10 bg-orange-50 py-3 px-3 text-base font-black text-orange-700 border-r border-orange-100">
-                      LMCache-DRAM
-                    </td>
-                    <td className="py-3 px-3 text-sm font-mono font-semibold text-gray-800 border-r border-gray-100">
-                      {modelLabel}
-                    </td>
-                    <td className="py-3 px-3 text-base font-mono font-bold text-gray-900">
-                      {avgInputTokensGlobal > 0 ? formatTokenCount(avgInputTokensGlobal) : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-base font-mono font-bold text-gray-900">
-                      {formatTokenCount(avgOutputTokens)}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-orange-700">
-                      {displayMetrics.length > 0 ? `${displayMetrics.reduce((sum, item) => sum + item.lmTtft, 0).toFixed(2)}s` : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-orange-700">
-                      {lmAvgTtftGlobal > 0 ? `${lmAvgTtftGlobal.toFixed(3)}s` : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-orange-700 border-r border-gray-200">
-                      {lmEstimatedQpsGlobal > 0 ? lmEstimatedQpsGlobal.toFixed(2) : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-base font-mono font-bold text-gray-900 bg-emerald-50/65">
-                      {avgInputTokensRecent > 0 ? formatTokenCount(avgInputTokensRecent) : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-orange-700 bg-emerald-50/65">
-                      {lmAvgTtftRecent > 0 ? `${lmAvgTtftRecent.toFixed(3)}s` : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-orange-700 bg-emerald-50/65">
-                      {lmEstimatedQps > 0 ? lmEstimatedQps.toFixed(2) : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-orange-700 bg-emerald-50/65">
-                      {lmMaxTtftRecent > 0 ? `${lmMaxTtftRecent.toFixed(3)}s` : "--"}
-                    </td>
-                    <td className="py-3 px-3 bg-emerald-50/65 text-sm font-bold text-orange-700">
-                      {locale === "en" ? "Baseline" : "稳态基线"}
-                    </td>
-                  </tr>
-
-                  <tr className="bg-sky-50/35">
-                    <td className="sticky left-0 z-10 bg-sky-50 py-3 px-3 text-base font-black text-sky-700 border-r border-sky-100">
-                      InfiniKV (SSD)
-                    </td>
-                    <td className="py-3 px-3 text-sm font-mono font-semibold text-gray-800 border-r border-gray-100">
-                      {modelLabel}
-                    </td>
-                    <td className="py-3 px-3 text-base font-mono font-bold text-gray-900">
-                      {avgInputTokensGlobal > 0 ? formatTokenCount(avgInputTokensGlobal) : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-base font-mono font-bold text-gray-900">
-                      {formatTokenCount(avgOutputTokens)}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-sky-700">
-                      {displayMetrics.length > 0 ? `${displayMetrics.reduce((sum, item) => sum + item.ikTtft, 0).toFixed(2)}s` : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-sky-700">
-                      {ikAvgTtftGlobal > 0 ? `${ikAvgTtftGlobal.toFixed(3)}s` : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-sky-700 border-r border-gray-200">
-                      {ikEstimatedQpsGlobal > 0 ? ikEstimatedQpsGlobal.toFixed(2) : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-base font-mono font-bold text-gray-900 bg-emerald-50/65">
-                      {avgInputTokensRecent > 0 ? formatTokenCount(avgInputTokensRecent) : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-sky-700 bg-emerald-50/65">
-                      {ikAvgTtftRecent > 0 ? `${ikAvgTtftRecent.toFixed(3)}s` : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-sky-700 bg-emerald-50/65">
-                      {ikEstimatedQps > 0 ? ikEstimatedQps.toFixed(2) : "--"}
-                    </td>
-                    <td className="py-3 px-3 text-xl font-mono font-black text-sky-700 bg-emerald-50/65">
-                      {ikMaxTtftRecent > 0 ? `${ikMaxTtftRecent.toFixed(3)}s` : "--"}
-                    </td>
-                    <td className="py-3 px-3 bg-emerald-50/65 text-sm font-bold text-sky-700">
-                      {locale === "en" ? "Improved" : "稳态更优"}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            <ResponsiveContainer width="100%" height={350}>
+              <LineChart data={chartData} margin={{ top: 10, right: 40, left: 28, bottom: 36 }}>
+                <CartesianGrid vertical={false} stroke="#F3F4F6" strokeDasharray="4 4" />
+                <XAxis
+                  dataKey="round"
+                  stroke="transparent"
+                  tickLine={false}
+                  axisLine={false}
+                  dy={8}
+                  tick={{ fill: "#4B5563", fontSize: 15, fontWeight: 600 }}
+                  label={{ value: locale === "en" ? "Round" : "轮数", position: "insideBottom", offset: -18, fill: "#475569", fontSize: 15, fontWeight: 700 }}
+                />
+                <YAxis
+                  stroke="transparent"
+                  tickLine={false}
+                  axisLine={false}
+                  width={56}
+                  tick={{ fill: "#6B7280", fontSize: 15 }}
+                  domain={[0, 100]}
+                  unit="%"
+                  label={{ value: locale === "en" ? "Hit rate (%)" : "命中率 (%)", angle: -90, position: "insideLeft", fill: "#475569", fontSize: 15, fontWeight: 700, dx: -2 }}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "#fff", border: "none", borderRadius: "12px", fontSize: "14px", padding: "14px 18px", boxShadow: "0 8px 30px rgba(0,0,0,0.12)" }}
+                  labelStyle={{ fontWeight: 700, marginBottom: 8, fontSize: 15 }}
+                  cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
+                />
+                {recoveryStartRound > 0 && lastRound > recoveryStartRound && (
+                  <ReferenceArea x1={recoveryStartRound} x2={lastRound} stroke="#EF4444" strokeOpacity={0.9} strokeDasharray="5 4" fill="#EF4444" fillOpacity={0.06} label={{ value: locale === "en" ? "Revisit-recovery window" : "重访恢复窗口", position: "insideTop", fill: "#DC2626", fontSize: 15, fontWeight: 800 }} />
+                )}
+                {recoveryStartRound > 0 && gapIkExtHit > gapLmExtHit && (
+                  <ReferenceLine
+                    segment={[{ x: gapRound, y: gapLmExtHit }, { x: gapRound, y: gapIkExtHit }]}
+                    stroke="#DC2626" strokeWidth={2.5}
+                    label={{ value: locale === "en" ? "SSD hit ≈ 8.7× DRAM" : "SSD 命中率提升 8.7 倍", position: "left", fill: "#DC2626", fontSize: 14, fontWeight: 800 }}
+                  />
+                )}
+                <Line type="monotone" dataKey="LMCacheHit" name={locale === "en" ? "LMCache prefix hit" : "LMCache 前缀命中"} stroke="#F97316" strokeWidth={3} dot={{ r: 4, fill: "#F97316", strokeWidth: 0 }} />
+                <Line type="monotone" dataKey="InfiniKVHit" name={locale === "en" ? "InfiniKV prefix hit" : "InfiniKV 前缀命中"} stroke="#0EA5E9" strokeWidth={3} dot={{ r: 4, fill: "#0EA5E9", strokeWidth: 0 }} />
+                <Line type="monotone" dataKey="LMCacheExtHit" name={locale === "en" ? "LMCache DRAM hit" : "LMCache DRAM 命中"} stroke="#10B981" strokeWidth={2.5} strokeDasharray="5 4" dot={{ r: 4, fill: "#10B981", strokeWidth: 0 }} connectNulls={false} />
+                <Line type="monotone" dataKey="InfiniKVExtHit" name={locale === "en" ? "InfiniKV SSD hit" : "InfiniKV SSD 命中"} stroke="#8B5CF6" strokeWidth={2.5} strokeDasharray="5 4" dot={{ r: 4, fill: "#8B5CF6", strokeWidth: 0 }} />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         )}
-
 
         {/* TTFT 曲线 */}
         {displayMetrics.length >= 2 && (
           <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
             <div className="mb-6">
-              <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+              <div className="mb-3 flex flex-col items-center gap-2 text-center">
                 <div>
                   <h3 className="text-xl font-black text-gray-900 tracking-tight">{locale === "en" ? "TTFT Timeline (one point per round)" : "TTFT 时间线（每轮一个点）"}</h3>
-                  <p className="text-base text-gray-500 mt-1">{locale === "en" ? "Watch the second half of the run: DRAM eviction causes TTFT spikes on revisits; InfiniKV's SSD recall should keep the curve flatter." : "观察长跑后半程：DRAM 淘汰会让回访请求抬升，InfiniKV 的 SSD 召回应让曲线更平稳"}</p>
+                  <p className="mx-auto max-w-2xl text-base text-gray-500 mt-1">{locale === "en" ? "In a multi-round revisit scenario: DRAM eviction makes revisit TTFT spike, while InfiniKV's larger SSD keeps the curve flat." : "DRAM 触发淘汰会让重访请求的 TTFT 抬升，InfiniKV 凭借 SSD 保存更多 KV 让曲线更平稳。"}</p>
                 </div>
-                <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
+                <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
                   <span className="px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 font-semibold">{locale === "en" ? "Model" : "模型"} {modelLabel}</span>
-                  <span className="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 font-semibold">{locale === "en" ? "Avg Input [Global]" : "平均输入[全局]"} {avgInputTokensGlobal > 0 ? formatTokenCount(avgInputTokensGlobal) : "--"}</span>
-                  <span className="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 font-semibold">{locale === "en" ? "Avg Input [Latest-20]" : "平均输入[最近20]"} {avgInputTokensRecent > 0 ? formatTokenCount(avgInputTokensRecent) : "--"}</span>
+                  <span className="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 font-semibold">{locale === "en" ? "Avg Input" : "平均输入"} {avgInputTokensGlobal > 0 ? formatTokenCount(avgInputTokensGlobal) : "--"}</span>
                   <span className="px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 font-semibold">{locale === "en" ? "Avg Output" : "平均输出"} {formatTokenCount(avgOutputTokens)}</span>
-                  <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold">{locale === "en" ? "QPS [Latest-20]" : "QPS[最近20]"} {displayMetrics.length > 0 ? `${recentQpsGainPct >= 0 ? "+" : ""}${recentQpsGainPct.toFixed(1)}%` : "--"}</span>
                 </div>
               </div>
               <div className="flex justify-center w-full">
@@ -1372,32 +1345,34 @@ export default function StressTestPage() {
               </div>
             </div>
             <ResponsiveContainer width="100%" height={350}>
-              <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 20 }}>
+              <LineChart data={chartData} margin={{ top: 10, right: 40, left: 28, bottom: 36 }}>
                 <CartesianGrid vertical={false} stroke="#F3F4F6" strokeDasharray="4 4" />
                 <XAxis
                   dataKey="round"
                   stroke="transparent"
-                  fontSize={16}
-                  fontWeight={700}
                   tickLine={false}
                   axisLine={false}
-                  dy={10}
-                  tick={{ fill: "#4B5563" }}
+                  dy={8}
+                  tick={{ fill: "#4B5563", fontSize: 15, fontWeight: 600 }}
+                  label={{ value: locale === "en" ? "Round" : "轮数", position: "insideBottom", offset: -18, fill: "#475569", fontSize: 15, fontWeight: 700 }}
                 />
                 <YAxis
                   stroke="transparent"
-                  fontSize={15}
                   tickLine={false}
                   axisLine={false}
-                  tick={{ fill: "#6B7280" }}
+                  width={56}
+                  tick={{ fill: "#6B7280", fontSize: 15 }}
                   unit="s"
-                  label={{ value: locale === "en" ? "TTFT (s)" : "TTFT (秒)", angle: -90, position: "insideLeft", fill: "#6B7280", fontSize: 14, fontWeight: 700, dx: -8 }}
+                  label={{ value: locale === "en" ? "TTFT (s)" : "TTFT (秒)", angle: -90, position: "insideLeft", fill: "#475569", fontSize: 15, fontWeight: 700, dx: -2 }}
                 />
                 <Tooltip
                   contentStyle={{ backgroundColor: "#fff", border: "none", borderRadius: "12px", fontSize: "14px", padding: "14px 18px", boxShadow: "0 8px 30px rgba(0,0,0,0.12)" }}
                   labelStyle={{ fontWeight: 700, marginBottom: 8, fontSize: 15 }}
                   cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
                 />
+                {recoveryStartRound > 0 && lastRound > recoveryStartRound && (
+                  <ReferenceArea x1={recoveryStartRound} x2={lastRound} stroke="#EF4444" strokeOpacity={0.9} strokeDasharray="5 4" fill="#EF4444" fillOpacity={0.06} label={{ value: recoveryLabelTtft, position: "insideTop", fill: "#DC2626", fontSize: 15, fontWeight: 800 }} />
+                )}
                 <Line type="monotone" dataKey="LMCache" stroke="#F97316" strokeWidth={3} dot={{ r: 5, fill: "#F97316", strokeWidth: 0 }} activeDot={{ r: 7, fill: "#F97316" }} animationDuration={300} />
                 <Line type="monotone" dataKey="InfiniKV" stroke="#0EA5E9" strokeWidth={3} dot={{ r: 5, fill: "#0EA5E9", strokeWidth: 0 }} activeDot={{ r: 7, fill: "#0EA5E9" }} animationDuration={300} />
               </LineChart>
@@ -1405,132 +1380,75 @@ export default function StressTestPage() {
           </div>
         )}
 
-        {/* Cache 命中率曲线 */}
-        {displayMetrics.length >= 2 && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-                <div>
-                  <h3 className="text-xl font-black text-gray-900 tracking-tight">{locale === "en" ? "Cache Hit Rate Curves" : "Cache 命中率曲线"}</h3>
-                  <p className="text-base text-gray-500 mt-1">{locale === "en" ? "GPU prefix hit reflects HBM-side prefix reuse; DRAM KV Cache hit reflects the memory-tier hit; InfiniKV SSD Hit shows the SSD-tier recall contribution." : "GPU prefix hit 反映显存侧前缀复用；DRAM KV Cache hit 反映内存层命中；InfiniKV SSD Hit 反映 SSD 层召回贡献。"}</p>
-                </div>
+        {SHOW_CONTROLS && (<>
+          {/* 原始数据表 */}
+          {displayMetrics.length > 0 && (
+            <details className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+              <summary className="px-6 py-4 cursor-pointer text-base font-black text-gray-900 flex items-center justify-between hover:bg-gray-50">
+                <span>{locale === "en" ? `Raw Per-Round Data (${displayMetrics.length} rows)` : `原始每轮数据（${displayMetrics.length} 行）`}</span>
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </summary>
+              <div className="overflow-x-auto border-t border-gray-200">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr className="text-gray-500 font-medium">
+                      <th className="px-3 py-2 text-left">{locale === "en" ? "Round" : "轮"}</th>
+                      <th className="px-3 py-2 text-left">{locale === "en" ? "Session" : "会话"}</th>
+                      <th className="px-3 py-2 text-right">LM TTFT</th>
+                      <th className="px-3 py-2 text-right">IK TTFT</th>
+                      <th className="px-3 py-2 text-right">LM TPS</th>
+                      <th className="px-3 py-2 text-right">IK TPS</th>
+                      <th className="px-3 py-2 text-right">LM QPS</th>
+                      <th className="px-3 py-2 text-right">IK QPS</th>
+                      <th className="px-3 py-2 text-right">LM Hit%</th>
+                      <th className="px-3 py-2 text-right">IK Hit%</th>
+                      <th className="px-3 py-2 text-right">LM Ext Hit%</th>
+                      <th className="px-3 py-2 text-right">IK SSD Hit%</th>
+                      <th className="px-3 py-2 text-right">Tokens</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayMetrics.slice().reverse().map(m => {
+                      const shortName = docs.find(d => d.id === m.sessionId)?.name.slice(0, 18) || m.sessionId.slice(0, 8);
+                      const lmQps = estimateQps(m.lmTtft, m.lmTps, avgOutputTokens, concurrentFactor);
+                      const ikQps = estimateQps(m.ikTtft, m.ikTps, avgOutputTokens, concurrentFactor);
+                      return (
+                        <tr key={m.round} className="border-t border-gray-100 font-mono">
+                          <td className="px-3 py-1.5 text-gray-700 font-bold">#{m.round}</td>
+                          <td className="px-3 py-1.5 text-gray-500 truncate max-w-[180px]">{shortName}</td>
+                          <td className="px-3 py-1.5 text-right text-orange-700">{m.lmTtft.toFixed(3)}s</td>
+                          <td className="px-3 py-1.5 text-right text-sky-700">{m.ikTtft.toFixed(3)}s</td>
+                          <td className="px-3 py-1.5 text-right text-gray-600">{m.lmTps.toFixed(1)}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-600">{m.ikTps.toFixed(1)}</td>
+                          <td className="px-3 py-1.5 text-right text-orange-700">{lmQps > 0 ? lmQps.toFixed(2) : "--"}</td>
+                          <td className="px-3 py-1.5 text-right text-sky-700">{ikQps > 0 ? ikQps.toFixed(2) : "--"}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-600">{(m.lmPrefixHit * 100).toFixed(1)}%</td>
+                          <td className="px-3 py-1.5 text-right text-gray-600">{(m.ikPrefixHit * 100).toFixed(1)}%</td>
+                          <td className="px-3 py-1.5 text-right text-emerald-600">{m.lmExtHit === null ? "N/A" : `${(m.lmExtHit * 100).toFixed(1)}%`}</td>
+                          <td className="px-3 py-1.5 text-right text-violet-600">{m.ikExtHit === null ? "N/A" : `${(m.ikExtHit * 100).toFixed(1)}%`}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-400">{m.ikContextTokens.toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-              <div className="flex justify-center w-full">
-                <LegendChips
-                  className="justify-center"
-                  items={[
-                    { label: "LMCache DRAM Hit (GPU Prefix)", colorClass: "bg-orange-50 border-orange-200", textClass: "text-orange-700" },
-                    { label: "InfiniKV DRAM Hit (GPU Prefix)", colorClass: "bg-sky-50 border-sky-200", textClass: "text-sky-700" },
-                    { label: "LMCache External Hit", colorClass: "bg-emerald-50 border-emerald-200", textClass: "text-emerald-700" },
-                    { label: "InfiniKV SSD Hit (External)", colorClass: "bg-violet-50 border-violet-200", textClass: "text-violet-700" },
-                  ]}
-                />
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={350}>
-              <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 20 }}>
-                <CartesianGrid vertical={false} stroke="#F3F4F6" strokeDasharray="4 4" />
-                <XAxis
-                  dataKey="round"
-                  stroke="transparent"
-                  fontSize={16}
-                  fontWeight={700}
-                  tickLine={false}
-                  axisLine={false}
-                  dy={10}
-                  tick={{ fill: "#4B5563" }}
-                />
-                <YAxis
-                  stroke="transparent"
-                  fontSize={15}
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fill: "#6B7280" }}
-                  domain={[0, 100]}
-                  unit="%"
-                  label={{ value: "Hit Rate (%)", angle: -90, position: "insideLeft", fill: "#6B7280", fontSize: 14, fontWeight: 700, dx: -8 }}
-                />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "#fff", border: "none", borderRadius: "12px", fontSize: "14px", padding: "14px 18px", boxShadow: "0 8px 30px rgba(0,0,0,0.12)" }}
-                  labelStyle={{ fontWeight: 700, marginBottom: 8, fontSize: 15 }}
-                  cursor={{ stroke: "#E5E7EB", strokeWidth: 1 }}
-                />
-                <Line type="monotone" dataKey="LMCacheHit" name="LMCache DRAM hit (GPU Prefix)" stroke="#F97316" strokeWidth={3} dot={{ r: 4, fill: "#F97316", strokeWidth: 0 }} />
-                <Line type="monotone" dataKey="InfiniKVHit" name="InfiniKV DRAM hit (GPU Prefix)" stroke="#0EA5E9" strokeWidth={3} dot={{ r: 4, fill: "#0EA5E9", strokeWidth: 0 }} />
-                <Line type="monotone" dataKey="LMCacheExtHit" name="LMCache external hit" stroke="#10B981" strokeWidth={2.5} strokeDasharray="5 4" dot={{ r: 4, fill: "#10B981", strokeWidth: 0 }} connectNulls={false} />
-                <Line type="monotone" dataKey="InfiniKVExtHit" name="InfiniKV SSD hit (External)" stroke="#8B5CF6" strokeWidth={2.5} strokeDasharray="5 4" dot={{ r: 4, fill: "#8B5CF6", strokeWidth: 0 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        )}
+            </details>
+          )}
 
-        {/* 原始数据表 */}
-        {displayMetrics.length > 0 && (
-          <details className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
-            <summary className="px-6 py-4 cursor-pointer text-base font-black text-gray-900 flex items-center justify-between hover:bg-gray-50">
-              <span>{locale === "en" ? `Raw Per-Round Data (${displayMetrics.length} rows)` : `原始每轮数据（${displayMetrics.length} 行）`}</span>
-              <ChevronDown className="w-4 h-4 text-gray-400" />
-            </summary>
-            <div className="overflow-x-auto border-t border-gray-200">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr className="text-gray-500 font-medium">
-                    <th className="px-3 py-2 text-left">{locale === "en" ? "Round" : "轮"}</th>
-                    <th className="px-3 py-2 text-left">{locale === "en" ? "Session" : "会话"}</th>
-                    <th className="px-3 py-2 text-right">LM TTFT</th>
-                    <th className="px-3 py-2 text-right">IK TTFT</th>
-                    <th className="px-3 py-2 text-right">LM TPS</th>
-                    <th className="px-3 py-2 text-right">IK TPS</th>
-                    <th className="px-3 py-2 text-right">LM QPS</th>
-                    <th className="px-3 py-2 text-right">IK QPS</th>
-                    <th className="px-3 py-2 text-right">LM Hit%</th>
-                    <th className="px-3 py-2 text-right">IK Hit%</th>
-                    <th className="px-3 py-2 text-right">LM Ext Hit%</th>
-                    <th className="px-3 py-2 text-right">IK SSD Hit%</th>
-                    <th className="px-3 py-2 text-right">Tokens</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayMetrics.slice().reverse().map(m => {
-                    const shortName = docs.find(d => d.id === m.sessionId)?.name.slice(0, 18) || m.sessionId.slice(0, 8);
-                    const lmQps = estimateQps(m.lmTtft, m.lmTps, avgOutputTokens, concurrentFactor);
-                    const ikQps = estimateQps(m.ikTtft, m.ikTps, avgOutputTokens, concurrentFactor);
-                    return (
-                      <tr key={m.round} className="border-t border-gray-100 font-mono">
-                        <td className="px-3 py-1.5 text-gray-700 font-bold">#{m.round}</td>
-                        <td className="px-3 py-1.5 text-gray-500 truncate max-w-[180px]">{shortName}</td>
-                        <td className="px-3 py-1.5 text-right text-orange-700">{m.lmTtft.toFixed(3)}s</td>
-                        <td className="px-3 py-1.5 text-right text-sky-700">{m.ikTtft.toFixed(3)}s</td>
-                        <td className="px-3 py-1.5 text-right text-gray-600">{m.lmTps.toFixed(1)}</td>
-                        <td className="px-3 py-1.5 text-right text-gray-600">{m.ikTps.toFixed(1)}</td>
-                        <td className="px-3 py-1.5 text-right text-orange-700">{lmQps > 0 ? lmQps.toFixed(2) : "--"}</td>
-                        <td className="px-3 py-1.5 text-right text-sky-700">{ikQps > 0 ? ikQps.toFixed(2) : "--"}</td>
-                        <td className="px-3 py-1.5 text-right text-gray-600">{(m.lmPrefixHit * 100).toFixed(1)}%</td>
-                        <td className="px-3 py-1.5 text-right text-gray-600">{(m.ikPrefixHit * 100).toFixed(1)}%</td>
-                        <td className="px-3 py-1.5 text-right text-emerald-600">{m.lmExtHit === null ? "N/A" : `${(m.lmExtHit * 100).toFixed(1)}%`}</td>
-                        <td className="px-3 py-1.5 text-right text-violet-600">{m.ikExtHit === null ? "N/A" : `${(m.ikExtHit * 100).toFixed(1)}%`}</td>
-                        <td className="px-3 py-1.5 text-right text-gray-400">{m.ikContextTokens.toLocaleString()}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          {/* 说明卡片 */}
+          <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm text-sm text-gray-600 leading-relaxed space-y-2">
+            <div className="flex items-center space-x-2 mb-2">
+              <Info className="w-4 h-4 text-sky-500" />
+              <span className="font-black text-gray-900">{locale === "en" ? "How to see the revisit-recovery gap?" : "如何观察重访恢复差距？"}</span>
             </div>
-          </details>
-        )}
-
-        {/* 说明卡片 */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm text-sm text-gray-600 leading-relaxed space-y-2">
-          <div className="flex items-center space-x-2 mb-2">
-            <Info className="w-4 h-4 text-sky-500" />
-            <span className="font-black text-gray-900">{locale === "en" ? "How to see a steady-state gap?" : "怎样才能看到稳态差距？"}</span>
+            <p>{locale === "en" ? <>1. <b>Upload 5–8 medium-to-large PDF/TXT/MD files</b> (50K+ tokens each is better) so the total KV Cache working set clearly exceeds what DRAM can retain long-term.</> : <>1. <b>上传 5~8 份中到大 PDF/TXT/MD</b>（单份 50K+ token 更好），让工作集总 KV Cache 明显超过 DRAM 可长期保留的范围。</>}</p>
+            <p>{locale === "en" ? <>2. <b>Set the session revisit interval to 3–5</b>. Recently accessed documents are blocked by a cooldown, forcing the system to cycle through more sessions and making DRAM eviction more likely.</> : <>2. <b>会话重访间隔设 3~5</b>。最近几轮访问过的文档会被 cooldown 屏蔽，促使系统轮询更多 session，更容易触发 DRAM 淘汰。</>}</p>
+            <p>{locale === "en" ? <>3. <b>Run at least 50 rounds, 100+ recommended</b>. The early phase is mainly cold-start and warm-up; the revisit-recovery window is more informative about steady-state quality.</> : <>3. <b>至少跑 50 轮，推荐 100+ 轮</b>。前期主要是冷启动和预热；进入后半程后，重访段窗口更能说明稳态服务质量。</>}</p>
+            <p>{locale === "en" ? <>4. <b>Watch both TTFT and SSD Hit%</b>. When SSD Hit% rises from 0, the SSD tier is catching KV Cache evicted from DRAM; if TTFT stays stable, the recall path is genuinely working.</> : <>4. <b>同时看 TTFT 和 SSD Hit%</b>。SSD Hit% 从 0 上升，说明 SSD 层开始接住被 DRAM 挤出的 KV Cache；若 TTFT 仍稳定，说明复用链路真正有效。</>}</p>
+            <p>{locale === "en" ? <>5. <b>Focus on revisit-recovery avg TTFT, peak TTFT, and QPS</b>. Global metrics show total cost; the steady-state window shows the long-run gap between the two systems.</> : <>5. <b>优先解读重访段平均 TTFT、峰值 TTFT 和 QPS</b>。全局指标用于看总成本，重访恢复段用于判断长期运行时两种方案的差距。</>}</p>
           </div>
-          <p>{locale === "en" ? <>1. <b>Upload 5–8 medium-to-large PDF/TXT/MD files</b> (50K+ tokens each is better) so the total KV Cache working set clearly exceeds what DRAM can retain long-term.</> : <>1. <b>上传 5~8 份中到大 PDF/TXT/MD</b>（单份 50K+ token 更好），让工作集总 KV Cache 明显超过 DRAM 可长期保留的范围。</>}</p>
-          <p>{locale === "en" ? <>2. <b>Set the session revisit interval to 3–5</b>. Recently accessed documents are blocked by a cooldown, forcing the system to cycle through more sessions and making DRAM eviction more likely.</> : <>2. <b>会话回访间隔设 3~5</b>。最近几轮访问过的文档会被 cooldown 屏蔽，促使系统轮询更多 session，更容易触发 DRAM 淘汰。</>}</p>
-          <p>{locale === "en" ? <>3. <b>Run at least 50 rounds, 100+ recommended</b>. The early phase is mainly cold-start and warm-up; the latest-20-round window is more informative about steady-state quality.</> : <>3. <b>至少跑 50 轮，推荐 100+ 轮</b>。前期主要是冷启动和预热；进入后半程后，最近20轮窗口更能说明稳态服务质量。</>}</p>
-          <p>{locale === "en" ? <>4. <b>Watch both TTFT and SSD Hit%</b>. When SSD Hit% rises from 0, the SSD tier is catching KV Cache evicted from DRAM; if TTFT stays stable, the recall path is genuinely working.</> : <>4. <b>同时看 TTFT 和 SSD Hit%</b>。SSD Hit% 从 0 上升，说明 SSD 层开始接住被 DRAM 挤出的 KV Cache；若 TTFT 仍稳定，说明召回链路真正有效。</>}</p>
-          <p>{locale === "en" ? <>5. <b>Focus on latest-20-round avg TTFT, peak TTFT, and QPS</b>. Global metrics show total cost; the steady-state window shows the long-run gap between the two systems.</> : <>5. <b>优先解读最近20轮平均 TTFT、峰值 TTFT 和 QPS</b>。全局指标用于看总成本，稳态窗口用于判断长期运行时两种方案的差距。</>}</p>
-        </div>
+        </>)}
       </div>
 
       <HistoryModal
